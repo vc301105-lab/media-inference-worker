@@ -111,7 +111,9 @@ def write_script(film: Film, scenes: int = 3, lang: str = "en") -> Film:
 
     # 3-act narrative + optional extra scenes
     if lang == "hi":
-        beats = list(HINDI_BEATS)[: max(scenes, 3)][:scenes]
+        base = list(HINDI_BEATS)
+        # cycle beats if more scenes requested than templates
+        beats = [base[i % len(base)] for i in range(scenes)]
         dialogue = DIALOGUE_POOL.get(film.genre, DIALOGUE_POOL["drama"])
     else:
         acts = [
