@@ -73,9 +73,9 @@ def regenerate_shot(project: Project, shot_index: int, model: str = "kling-3.0",
     return shot
 
 
-def produce_film(project: Project) -> Path:
+def produce_film(project: Project, cinematic: bool = True, with_music: bool = True) -> Path:
     theme = project.root / "sound" / f"{project.film.slug}-theme.wav"
-    if not theme.exists():
+    if with_music and not theme.exists():
         _p("  → generating genre soundtrack…")
         try:
             from .soundtrack import generate_theme
@@ -84,4 +84,4 @@ def produce_film(project: Project) -> Path:
         except Exception as exc:
             _p(f"    ⚠ soundtrack skipped: {exc}")
     _p("  → rendering final movie…")
-    return render_film(project)
+    return render_film(project, with_music=with_music, cinematic=cinematic)

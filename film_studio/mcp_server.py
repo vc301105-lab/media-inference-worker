@@ -165,6 +165,19 @@ def postproduction(film_slug: str, export_ratios: list[str] | None = None) -> di
 
 
 @mcp.tool()
+def cinematic_look(film_slug: str, grain: int = 6, letterbox: bool = True) -> dict:
+    """Apply 2.35:1 letterbox + film grain + vignette to the rendered movie (cinematic finish)."""
+    project = _project(film_slug)
+    movie = project.root / "movie" / f"{project.film.slug}.mp4"
+    if not movie.exists():
+        raise ValueError("Movie render nahi hui. Pehle render_final() chalao.")
+    from .finish import apply_film_look
+
+    apply_film_look(movie, grain=grain, bars=letterbox)
+    return {"slug": film_slug, "movie": str(movie), "look": "letterbox+grain+vignette"}
+
+
+@mcp.tool()
 def make_trailer_tool(film_slug: str) -> dict:
     """Build a fast-cut teaser trailer (COMING SOON) with the film's genre music."""
     project = _project(film_slug)

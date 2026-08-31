@@ -21,6 +21,7 @@ from werkzeug.utils import secure_filename
 from .config import check_providers, load_env
 from .pipeline import plan_film
 from .project import FILMS_DIR, load_project
+from .render import _ffmpeg
 
 app = Flask(__name__)
 
@@ -85,6 +86,7 @@ ACTION_NAMES = {
     "postpro": "Post-Production",
     "plan": "Plan",
     "publish": "Publish to YouTube",
+    "finish": "Cinematic Look",
 }
 
 
@@ -277,16 +279,24 @@ def _scene_block(project, scene) -> str:
     for s in scene.shots:
         asset_ok = s.local_asset and Path(s.local_asset).exists()
         status = '<span class="ok">✓ asset</span>' if asset_ok else '<span class="muted">ℹ no asset</span>'
+        thumb = (
+            f'<img class="shot-thumb" src="{url_for("shot_thumb", slug=project.film.slug, index=s.index)}" loading="lazy">'
+            if asset_ok
+            else '<div class="shot-thumb ph">🎬</div>'
+        )
         shots += f"""
-        <form method="post" action="/film/{project.film.slug}/shot" class="shot-form">
-          <input type="hidden" name="index" value="{s.index}">
-          <span class="shot-id">#{s.index + 1}</span>
-          <span class="shot-cam">{s.camera}</span>
-          <input class="shot-prompt" name="prompt" value="{s.prompt}" placeholder="Prompt">
-          <input class="shot-dur" name="duration" type="number" value="{s.duration}" step="0.5" min="2" max="15" title="seconds">
-          <button class="small ghost" type="submit">💾</button>
-          {status}
-        </form>"""
+        <div class="shot-row">
+          <form method="post" action="/film/{project.film.slug}/shot" class="shot-form">
+            <input type="hidden" name="index" value="{s.index}">
+            <span class="shot-id">#{s.index + 1}</span>
+            <span class="shot-cam">{s.camera}</span>
+            <input class="shot-prompt" name="prompt" value="{s.prompt}" placeholder="Prompt">
+            <input class="shot-dur" name="duration" type="number" value="{s.duration}" step="0.5" min="2" max="15" title="seconds">
+            <button class="small ghost" type="submit">💾</button>
+            {status}
+          </form>
+          {thumb}
+        </div>"""
     return f"""
     <div class="scene">
       <div class="scene-head"><span class="scene-num">SCENE {scene.number}</span><span class="scene-heading">{scene.heading}</span></div>
@@ -328,6 +338,45 @@ def job_status(key: str):
     if data is None:
         return jsonify({"state": "unknown"}), 404
     return jsonify(data)
+
+
+@app.get("/film/<slug>/shot/<int:index>/thumb")
+def shot_thumb(slug: str, index: int):
+    """Return a small preview image for a shot's generated asset (cached)."""
+    root = FILMS_DIR / secure_filename(slug)
+    if not (root / "film.json").exists():
+        return ("not found", 404)
+    try:
+        project = load_project(root)
+        shot = project.shots[index]
+    except Exception:
+        return ("not found", 404)
+    asset = Path(shot.local_asset) if shot.local_asset else None
+    if not asset or not asset.exists():
+        return ("not found", 404)
+
+    cache = root / "render" / "previews"
+    cache.mkdir(parents=True, exist_ok=True)
+    out = cache / f"thumb-{index:02d}.jpg"
+    if not out.exists():
+        try:
+            if asset.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}:
+                from PIL import Image
+
+                img = Image.open(asset).convert("RGB")
+                img.thumbnail((320, 200))
+                img.save(out, quality=82)
+            else:
+                ffmpeg = _ffmpeg()
+                subprocess.run(
+                    [ffmpeg, "-y", "-ss", "0.8", "-i", str(asset), "-frames:v", "1", "-vf", "scale=320:-2", str(out)],
+                    capture_output=True,
+                )
+        except Exception:
+            return ("not found", 404)
+    if not out.exists():
+        return ("not found", 404)
+    return send_from_directory(cache, out.name)
 
 
 @app.get("/film/<slug>/movie/<path:filename>")
@@ -403,12 +452,15 @@ button.small { padding:7px 12px; font-size:12px; }
 .scene-num { color:var(--accent); font-size:11px; font-weight:700; letter-spacing:1px; }
 .scene-heading { font-size:14px; font-weight:600; color:var(--accent2); }
 .scene-action,.scene-narr { font-size:13px; color:#c8cade; margin:4px 0; }
-.shot { display:flex; gap:10px; align-items:center; font-size:12px; border-top:1px dashed var(--line); padding:7px 0 0; margin-top:7px; }
+.shot-row { display:flex; gap:12px; align-items:center; border-top:1px dashed var(--line); padding:8px 0 0; margin-top:8px; }
+.shot { display:flex; gap:10px; align-items:center; font-size:12px; }
 .shot-id { color:var(--muted); font-weight:700; }
 .shot-cam { color:var(--accent2); min-width:110px; }
-.shot-form { display:flex; gap:8px; align-items:center; flex-wrap:wrap; width:100%; }
+.shot-form { display:flex; gap:8px; align-items:center; flex-wrap:wrap; flex:1; }
 .shot-prompt { flex:1; background:var(--card); font-size:12px; padding:7px 10px; min-width:220px; }
 .shot-dur { width:70px; padding:7px 8px; }
+.shot-thumb { width:110px; height:62px; object-fit:cover; border-radius:6px; border:1px solid var(--line); flex-shrink:0; }
+.shot-thumb.ph { display:flex; align-items:center; justify-content:center; background:var(--card2); font-size:20px; }
 a.danger { color:#ff7b7b; font-size:12px; }
 textarea { background:var(--card2); border:1px solid var(--line); color:#fff; border-radius:8px; padding:10px 12px; font-size:14px; width:100%; resize:vertical; }
 .dl { display:inline-block; background:var(--card2); border:1px solid var(--line); color:var(--accent2); text-decoration:none; border-radius:8px; padding:8px 12px; font-size:12px; margin:4px 6px 0 0; }
@@ -472,6 +524,7 @@ _FILM_TMPL = """
     <button class="small" onclick="runJob('sound')">🎵 Soundtrack</button>
     <button class="small" onclick="runJob('render')">🎞 Render Movie</button>
     <button class="small" onclick="runJob('trailer')">🍿 Trailer</button>
+    <button class="small" onclick="runJob('finish')">🎬 Cinematic Look</button>
     <button class="small" onclick="runJob('postpro')">🖼 Poster + Subtitles</button>
     <button class="small ghost" onclick="runJob('export')">📱 9:16 + 1:1 Export</button>
     <button class="small ghost" onclick="runJob('publish')">📤 Publish to YouTube</button>

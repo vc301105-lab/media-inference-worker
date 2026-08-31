@@ -72,9 +72,23 @@ def cmd_voice(args) -> int:
 def cmd_render(args) -> int:
     project = load_project(_find_project(args))
     _p("🎞 Rendering final film…")
-    out = produce_film(project)
+    out = produce_film(project, cinematic=not args.no_look)
     _p(f"✅ Movie ready: {out}")
     _p(f"   Runtime: {project.film.duration:.0f}s | {out.stat().st_size / 1e6:.1f} MB")
+    return 0
+
+
+def cmd_finish(args) -> int:
+    project = load_project(_find_project(args))
+    movie = project.root / "movie" / f"{project.film.slug}.mp4"
+    if not movie.exists():
+        _p("❌ Movie not rendered yet. Run: film-studio render")
+        return 1
+    _p(f"🎬 Applying cinematic look (grain={args.grain}, bars={not args.no_bars})…")
+    from .finish import apply_film_look
+
+    apply_film_look(movie, grain=args.grain, bars=not args.no_bars)
+    _p(f"✅ Cinematic finish done → {movie}")
     return 0
 
 
@@ -262,7 +276,13 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--lang", default="en-IN")
     sp.add_argument("--silent", action="store_true", help="Force silent tracks (offline mode)")
 
-    sub.add_parser("render", help="Render the final movie", parents=[common])
+    sp = sub.add_parser("render", help="Render the final movie", parents=[common])
+    sp.add_argument("--no-look", action="store_true", help="Skip cinematic letterbox/grain")
+
+    sp = sub.add_parser("finish", help="Apply cinematic look to rendered movie", parents=[common])
+    sp.add_argument("--grain", type=int, default=6, help="Film grain strength (0=off)")
+    sp.add_argument("--no-bars", action="store_true", help="Skip 2.35:1 letterbox")
+
     sub.add_parser("trailer", help="Make a fast-cut teaser trailer", parents=[common])
 
     sp = sub.add_parser("shot", help="Regenerate one shot by number", parents=[common])
@@ -315,6 +335,7 @@ def main(argv=None) -> int:
             "build": cmd_build,
             "voice": cmd_voice,
             "render": cmd_render,
+            "finish": cmd_finish,
             "trailer": cmd_trailer,
             "shot": cmd_shot,
             "rename": cmd_rename,

@@ -348,9 +348,11 @@ def export_aspect(project: Project, movie: Path, ratio: str = "9:16") -> Path:
     return out
 
 
-def render_film(project: Project, with_music: bool = True) -> Path:
+def render_film(project: Project, with_music: bool = True, cinematic: bool = True) -> Path:
     """Render the whole film: title card + per-shot clips (+ narration where available).
 
+    - Narration longer than the scene → last shot auto-extends (voice never cut off).
+    - cinematic=True applies 2.35:1 letterbox + film grain + vignette at the end.
     Also writes subtitles.srt and mixes the genre soundtrack if it exists.
     """
     film = project.film
@@ -374,6 +376,12 @@ def render_film(project: Project, with_music: bool = True) -> Path:
 
     for scene in film.scenes:
         scene_audio = narration.get(str(scene.number))
+        # Sync: if narration audio is longer than the scene's shots, extend the last shot
+        if scene_audio and Path(scene_audio).exists():
+            need = _probe_duration(Path(scene_audio))
+            have = sum(s.duration for s in scene.shots)
+            if need > have + 0.4:
+                scene.shots[-1].duration += (need - have)
         scene_start = cursor
         scene_len = 0.0
         for shot in scene.shots:
@@ -419,4 +427,10 @@ def render_film(project: Project, with_music: bool = True) -> Path:
         mix_music(project, movie, theme)
     if cues:
         write_srt(project, cues)
+
+    # cinematic finish: letterbox + grain + vignette
+    if cinematic:
+        from .finish import apply_film_look
+
+        apply_film_look(movie)
     return movie
