@@ -52,7 +52,8 @@ Sab actions background mein chalte hain aur log live update hota hai — page re
 | `plan` | Pura storyboard dekho |
 | `build --model M` | AI se shots generate karo (images/videos) |
 | `voice` | Narration generate karo (voiceover) |
-| `render` | Final movie render karo (music + subtitles + cinematic look ke saath) |
+| `render --transition dissolve` | Final movie — transitions + sfx + music + subtitles + cinematic look |
+| `new "Title" --lang hi` | Hindi screenplay + dialogue ke saath film |
 | `finish --grain 6` | Movie par 2.35:1 letterbox + grain + vignette apply karo |
 | `trailer` | Fast-cut teaser trailer banao (COMING SOON + music) |
 | `shot 3 --model kling-3.0` | Sirf ek shot regenerate karo |

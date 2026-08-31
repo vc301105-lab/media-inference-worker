@@ -33,6 +33,7 @@ class Scene:
     heading: str  # e.g. "EXT. CITY ROOFTOP - NIGHT"
     action: str
     narration: str = ""
+    dialogue: str = ""
     shots: list[Shot] = field(default_factory=list)
 
 
@@ -41,6 +42,7 @@ class Film:
     title: str
     logline: str = ""
     genre: str = "drama"
+    lang: str = "en"
     scenes: list[Scene] = field(default_factory=list)
     credits: str = ""
 
@@ -73,8 +75,8 @@ class Project:
         return out
 
 
-def new_project(title: str, logline: str = "", genre: str = "drama", credits: str = "") -> Project:
-    film = Film(title=title, logline=logline, genre=genre, credits=credits or f"A {genre} short film. Made with AI Film Studio.")
+def new_project(title: str, logline: str = "", genre: str = "drama", credits: str = "", lang: str = "en") -> Project:
+    film = Film(title=title, logline=logline, genre=genre, lang=lang, credits=credits or f"A {genre} short film. Made with AI Film Studio.")
     root = FILMS_DIR / film.slug
     if root.exists():
         backup = FILMS_DIR / f"{film.slug}-{len(list(FILMS_DIR.glob(f'{film.slug}-*')))}"
@@ -90,6 +92,7 @@ def save_project(project: Project) -> None:
         "title": project.film.title,
         "logline": project.film.logline,
         "genre": project.film.genre,
+        "lang": project.film.lang,
         "credits": project.film.credits,
         "slug": project.film.slug,
         "scenes": [],
@@ -101,6 +104,7 @@ def save_project(project: Project) -> None:
                 "heading": scene.heading,
                 "action": scene.action,
                 "narration": scene.narration,
+                "dialogue": scene.dialogue,
                 "shots": [
                     {
                         "index": s.index,
@@ -216,7 +220,8 @@ def load_project(root: Path) -> Project:
                 number=sc["number"],
                 heading=sc["heading"],
                 action=sc["action"],
-                narration=sc["narration"],
+                narration=sc.get("narration", ""),
+                dialogue=sc.get("dialogue", ""),
                 shots=[
                     Shot(
                         index=s["index"],
@@ -231,5 +236,12 @@ def load_project(root: Path) -> Project:
                 ],
             )
         )
-    film = Film(title=data["title"], logline=data["logline"], genre=data["genre"], credits=data["credits"], scenes=scenes)
+    film = Film(
+        title=data["title"],
+        logline=data.get("logline", ""),
+        genre=data.get("genre", "drama"),
+        lang=data.get("lang", "en"),
+        credits=data.get("credits", ""),
+        scenes=scenes,
+    )
     return Project(film=film, root=root)

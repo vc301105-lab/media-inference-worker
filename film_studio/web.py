@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import os
 import queue
+import re
 import subprocess
 import sys
 import threading
@@ -88,6 +89,8 @@ ACTION_NAMES = {
     "plan": "Plan",
     "publish": "Publish to YouTube",
     "finish": "Cinematic Look",
+    "review": "AI Review",
+    "trailer": "Trailer",
 }
 
 
@@ -107,6 +110,7 @@ def list_films() -> list[dict]:
                             "slug": project.film.slug,
                             "title": project.film.title,
                             "genre": project.film.genre,
+                            "lang": project.film.lang,
                             "logline": project.film.logline,
                             "scenes": len(project.film.scenes),
                             "shots": len(project.shots),
@@ -154,7 +158,7 @@ def _film_card(f: dict) -> str:
     <a class="film-card" href="{url_for('film', slug=f['slug'])}">
       {thumb}
       <div class="film-info">
-        <div class="film-title">{f['title']}</div>
+        <div class="film-title">{f['title']} {f'<span class="lang">(हि)</span>' if f['lang'] == 'hi' else ''}</div>
         <div class="film-meta">
           <span class="badge">{f['genre']}</span>
           <span>{f['scenes']} scenes · {f['shots']} shots</span>
@@ -172,10 +176,11 @@ def new():
     if not title:
         return redirect(url_for("index"))
     genre = request.form.get("genre", "drama")
+    lang = request.form.get("lang", "en")
     scenes = max(1, min(int(request.form.get("scenes", 3)), 12))
     shots = max(1, min(int(request.form.get("shots", 2)), 8))
     duration = max(2.0, min(float(request.form.get("duration", 4)), 15))
-    project = plan_film(title, request.form.get("logline", ""), genre, scenes=scenes, shots=shots, duration=duration)
+    project = plan_film(title, request.form.get("logline", ""), genre, scenes=scenes, shots=shots, duration=duration, lang=lang)
     return redirect(url_for("film", slug=project.film.slug))
 
 
@@ -289,173 +294,6 @@ def delete_film(slug: str):
     return redirect(url_for("index"))
 
 
-@app.get("/film/<slug>")
-def film(slug: str):
-    root = FILMS_DIR / secure_filename(slug)
-    if not (root / "film.json").exists():
-        return redirect(url_for("index"))
-    project = load_project(root)
-    scenes_html = "".join(_scene_block(project, s) for s in project.film.scenes)
-    movie = root / "movie" / f"{project.film.slug}.mp4"
-    video = ""
-    if movie.exists():
-        video = f'''
-        <div class="player">
-          <video controls preload="metadata" poster="{url_for('movie_file', slug=slug, filename='poster.png') if (root/'movie'/'poster.png').exists() else ''}">
-            <source src="{url_for('movie_file', slug=slug, filename=movie.name)}" type="video/mp4">
-          </video>
-        </div>'''
-    downloads = _download_links(root, slug)
-    from .review import load_review
-
-    review = load_review(project)
-    review_html = _review_html(review) if review else ""
-    return render_page(
-        _FILM_TMPL.format(
-            title=project.film.title,
-            genre=project.film.genre,
-            logline=project.film.logline or "",
-            credits=project.film.credits,
-            genres=" ".join(
-                f'<option value="{g}"{" selected" if g == project.film.genre else ""}>{g}</option>' for g in GENRES
-            ),
-            scenes=scenes_html,
-            video=video,
-            downloads=downloads,
-            slug=slug,
-            models=" ".join(f'<option value="{m}">{m}</option>' for m in MODELS),
-            review_html=review_html,
-        )
-    )
-
-
-def _review_html(review: dict) -> str:
-    scores = " ".join(
-        f'<span class="score { "ok" if float(r["score"]) >= 6.5 else ("weak" if float(r["score"]) >= 5 else "bad") }">#{r["shot"]} {r["score"]}</span>'
-        for r in review.get("details", [])
-        if r.get("score") is not None
-    )
-    recs = "".join(f"<li>{r}</li>" for r in review.get("recommendations", [])[:8]) or "<li>Sab shots strong — koi fix nahi chahiye ✅</li>"
-    return f"""
-    <div class="card">
-      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
-        <h2 style="margin:0;">🔍 AI Director Review</h2>
-        <span class="avg">Avg {review['average_score']}/10 · {review['shots_analyzed']} shots</span>
-      </div>
-      <div class="scores">{scores or '<span class="muted">Shots generate hone ke baad review karo</span>'}</div>
-      <ul class="recs">{recs}</ul>
-      <div style="margin-top:8px;">
-        <form method="post" action="/film/{review['film']}/review" style="display:inline">
-          <button class="small">🔄 Re-run Review</button>
-        </form>
-        <a class="dl" href="/film/{review['film']}/movie/subtitles.srt" style="display:none"></a>
-      </div>
-    </div>"""
-
-
-def _scene_block(project, scene) -> str:
-    # global shot index for this scene
-    offset = 0
-    for s in project.film.scenes:
-        if s is scene:
-            break
-        offset += len(s.shots)
-    review = load_review(project)
-    scores = {r["shot"]: r for r in (review or {}).get("details", [])}
-    shots = ""
-    for s in scene.shots:
-        asset_ok = s.local_asset and Path(s.local_asset).exists()
-        status = '<span class="ok">✓ asset</span>' if asset_ok else '<span class="muted">ℹ no asset</span>'
-        thumb = (
-            f'<img class="shot-thumb" src="{url_for("shot_thumb", slug=project.film.slug, index=s.index)}" loading="lazy">'
-            if asset_ok
-            else '<div class="shot-thumb ph">🎬</div>'
-        )
-        score = scores.get(s.index + 1)
-        badge = ""
-        if score and score.get("score") is not None:
-            cls = "score-ok" if score["score"] >= 6.5 else ("score-weak" if score["score"] >= 5 else "score-bad")
-            badge = f'<span class="shot-score {cls}" title="{"; ".join(score.get("flags") or [])}">{score["score"]}</span>'
-        shots += f"""
-        <div class="shot-row">
-          {thumb}
-          <form method="post" action="/film/{project.film.slug}/shot" class="shot-form">
-            <input type="hidden" name="index" value="{s.index}">
-            <span class="shot-id">#{s.index + 1}</span>
-            <span class="shot-cam">{s.camera}</span>
-            <input class="shot-prompt" name="prompt" value="{s.prompt}" placeholder="Prompt">
-            <input class="shot-dur" name="duration" type="number" value="{s.duration}" step="0.5" min="2" max="15" title="seconds">
-            <button class="small ghost" type="submit">💾</button>
-            {status}
-          </form>
-          {badge}
-          <form method="post" action="/film/{project.film.slug}/shot/move" style="display:inline">
-            <input type="hidden" name="index" value="{s.index}">
-            <input type="hidden" name="dir" value="left">
-            <button class="mini" title="Move left">◀</button>
-          </form>
-          <form method="post" action="/film/{project.film.slug}/shot/move" style="display:inline">
-            <input type="hidden" name="index" value="{s.index}">
-            <input type="hidden" name="dir" value="right">
-            <button class="mini" title="Move right">▶</button>
-          </form>
-          <form method="post" action="/film/{project.film.slug}/shot/delete" style="display:inline"
-                onsubmit="return confirm('Shot delete karna hai?')">
-            <input type="hidden" name="index" value="{s.index}">
-            <button class="mini" title="Delete" style="color:#ff7b7b;">✕</button>
-          </form>
-        </div>"""
-    return f"""
-    <div class="scene">
-      <div class="scene-head"><span class="scene-num">SCENE {scene.number}</span><span class="scene-heading">{scene.heading}</span></div>
-      <div class="scene-action">{scene.action}</div>
-      {f'<div class="scene-narr">🗣 {scene.narration}</div>' if scene.narration else ''}
-      {shots}
-      <div class="scene-actions">
-        <form method="post" action="/film/{project.film.slug}/shot/add" style="display:inline">
-          <input type="hidden" name="scene" value="{scene.number}">
-          <input type="hidden" name="duration" value="{scene.shots[0].duration if scene.shots else 4}">
-          <button class="small ghost">＋ Add Take</button>
-        </form>
-        <span class="muted">◀ ▶ reorder · ✕ delete · 💾 save prompt</span>
-      </div>
-    </div>"""
-
-
-def _download_links(root: Path, slug: str) -> str:
-    movie_dir = root / "movie"
-    items = []
-    for pattern, label in [(f"{slug}.mp4", "Movie"), ("poster.png", "Poster"), ("thumbnail.jpg", "Thumb"), ("subtitles.srt", "Subtitles"), ("*-9x16.mp4", "9:16"), ("*-1x1.mp4", "1:1")]:
-        for p in sorted(movie_dir.glob(pattern)):
-            items.append(f'<a class="dl" href="{url_for("movie_file", slug=slug, filename=p.name)}">{label} · {p.stat().st_size/1e6:.1f} MB</a>')
-    return "".join(items) or '<span class="muted">Abhi koi output nahi — Render chalao.</span>'
-
-
-@app.post("/film/<slug>/job")
-def job(slug: str):
-    slug = secure_filename(slug)
-    action = request.form.get("action", "render")
-    extra: list[str] = []
-    if action == "build":
-        extra = ["--model", request.form.get("model", "kling-3.0"), "--shots", request.form.get("shots_count", "0")]
-    if action == "voice":
-        extra = ["--lang", request.form.get("lang", "hi-IN")]
-        if request.form.get("silent") == "1":
-            extra.append("--silent")
-    if action == "postpro" and request.form.get("ratios"):
-        extra = ["--ratios", *request.form.get("ratios").split()]
-    key = JOBS.start(slug, action, extra)
-    return jsonify({"job": key})
-
-
-@app.get("/api/jobs/<key>")
-def job_status(key: str):
-    data = JOBS.status(key)
-    if data is None:
-        return jsonify({"state": "unknown"}), 404
-    return jsonify(data)
-
-
 @app.get("/film/<slug>/shot/<int:index>/thumb")
 def shot_thumb(slug: str, index: int):
     """Return a small preview image for a shot's generated asset (cached)."""
@@ -506,6 +344,170 @@ def movie_file(slug: str, filename: str):
     return send_from_directory(root, safe, conditional=True)
 
 
+@app.get("/film/<slug>")
+def film(slug: str):
+    root = FILMS_DIR / secure_filename(slug)
+    if not (root / "film.json").exists():
+        return redirect(url_for("index"))
+    project = load_project(root)
+    scenes_html = "".join(_scene_block(project, s) for s in project.film.scenes)
+    movie = root / "movie" / f"{project.film.slug}.mp4"
+    video = ""
+    if movie.exists():
+        poster = (
+            url_for("movie_file", slug=slug, filename="poster.png")
+            if (root / "movie" / "poster.png").exists()
+            else ""
+        )
+        video = f"""
+        <div class="player">
+          <video controls preload="metadata" poster="{poster}">
+            <source src="{url_for('movie_file', slug=slug, filename=movie.name)}" type="video/mp4">
+          </video>
+        </div>"""
+    downloads = _download_links(root, slug)
+    review = load_review(project)
+    review_html = _review_html(review) if review else ""
+    return render_page(
+        _FILM_TMPL.format(
+            title=project.film.title,
+            genre=project.film.genre,
+            logline=project.film.logline or "",
+            credits=project.film.credits,
+            genres=" ".join(
+                f'<option value="{g}"{" selected" if g == project.film.genre else ""}>{g}</option>' for g in GENRES
+            ),
+            scenes=scenes_html,
+            video=video,
+            downloads=downloads,
+            slug=slug,
+            models=" ".join(f'<option value="{m}">{m}</option>' for m in MODELS),
+            review_html=review_html,
+        )
+    )
+
+
+def _review_html(review: dict) -> str:
+    scores = " ".join(
+        f'<span class="score { "ok" if float(r["score"]) >= 6.5 else ("weak" if float(r["score"]) >= 5 else "bad") }">#{r["shot"]} {r["score"]}</span>'
+        for r in review.get("details", [])
+        if r.get("score") is not None
+    )
+    recs = "".join(f"<li>{r}</li>" for r in review.get("recommendations", [])[:8]) or "<li>Sab shots strong — koi fix nahi chahiye ✅</li>"
+    return f"""
+    <div class="card">
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+        <h2 style="margin:0;">🔍 AI Director Review</h2>
+        <span class="avg">Avg {review['average_score']}/10 · {review['shots_analyzed']} shots</span>
+      </div>
+      <div class="scores">{scores or '<span class="muted">Shots generate hone ke baad review karo</span>'}</div>
+      <ul class="recs">{recs}</ul>
+      <div style="margin-top:8px;">
+        <form method="post" action="/film/{review['film']}/review" style="display:inline">
+          <button class="small">🔄 Re-run Review</button>
+        </form>
+      </div>
+    </div>"""
+
+
+def _scene_block(project, scene) -> str:
+    review = load_review(project)
+    scores = {r["shot"]: r for r in (review or {}).get("details", [])}
+    shots = ""
+    for s in scene.shots:
+        asset_ok = s.local_asset and Path(s.local_asset).exists()
+        status = '<span class="ok">✓ asset</span>' if asset_ok else '<span class="muted">ℹ no asset</span>'
+        thumb = (
+            f'<img class="shot-thumb" src="{url_for("shot_thumb", slug=project.film.slug, index=s.index)}" loading="lazy">'
+            if asset_ok
+            else '<div class="shot-thumb ph">🎬</div>'
+        )
+        score = scores.get(s.index + 1)
+        badge = ""
+        if score and score.get("score") is not None:
+            cls = "score-ok" if float(score["score"]) >= 6.5 else ("score-weak" if float(score["score"]) >= 5 else "score-bad")
+            badge = f'<span class="shot-score {cls}" title="{"; ".join(score.get("flags") or [])}">{score["score"]}</span>'
+        shots += f"""
+        <div class="shot-row">
+          {thumb}
+          <form method="post" action="/film/{project.film.slug}/shot" class="shot-form">
+            <input type="hidden" name="index" value="{s.index}">
+            <span class="shot-id">#{s.index + 1}</span>
+            <span class="shot-cam">{s.camera}</span>
+            <input class="shot-prompt" name="prompt" value="{s.prompt}" placeholder="Prompt">
+            <input class="shot-dur" name="duration" type="number" value="{s.duration}" step="0.5" min="2" max="15" title="seconds">
+            <button class="small ghost" type="submit">💾</button>
+            {status}
+          </form>
+          {badge}
+          <form method="post" action="/film/{project.film.slug}/shot/move" style="display:inline">
+            <input type="hidden" name="index" value="{s.index}">
+            <input type="hidden" name="dir" value="left">
+            <button class="mini" title="Move left">◀</button>
+          </form>
+          <form method="post" action="/film/{project.film.slug}/shot/move" style="display:inline">
+            <input type="hidden" name="index" value="{s.index}">
+            <input type="hidden" name="dir" value="right">
+            <button class="mini" title="Move right">▶</button>
+          </form>
+          <form method="post" action="/film/{project.film.slug}/shot/delete" style="display:inline"
+                onsubmit="return confirm('Shot delete karna hai?')">
+            <input type="hidden" name="index" value="{s.index}">
+            <button class="mini" title="Delete" style="color:#ff7b7b;">✕</button>
+          </form>
+        </div>"""
+    return f"""
+    <div class="scene">
+      <div class="scene-head"><span class="scene-num">SCENE {scene.number}</span><span class="scene-heading">{scene.heading}</span></div>
+      <div class="scene-action">{scene.action}</div>
+      {f'<div class="scene-dialogue">🎤 {scene.dialogue}</div>' if scene.dialogue else ''}
+      {f'<div class="scene-narr">🗣 {scene.narration}</div>' if scene.narration else ''}
+      {shots}
+      <div class="scene-actions">
+        <form method="post" action="/film/{project.film.slug}/shot/add" style="display:inline">
+          <input type="hidden" name="scene" value="{scene.number}">
+          <input type="hidden" name="duration" value="{scene.shots[0].duration if scene.shots else 4}">
+          <button class="small ghost">＋ Add Take</button>
+        </form>
+        <span class="muted">◀ ▶ reorder · ✕ delete · 💾 save prompt</span>
+      </div>
+    </div>"""
+
+
+def _download_links(root: Path, slug: str) -> str:
+    movie_dir = root / "movie"
+    items = []
+    for pattern, label in [(f"{slug}.mp4", "Movie"), ("poster.png", "Poster"), ("thumbnail.jpg", "Thumb"), ("subtitles.srt", "Subtitles"), ("*-9x16.mp4", "9:16"), ("*-1x1.mp4", "1:1")]:
+        for p in sorted(movie_dir.glob(pattern)):
+            items.append(f'<a class="dl" href="{url_for("movie_file", slug=slug, filename=p.name)}">{label} · {p.stat().st_size/1e6:.1f} MB</a>')
+    return "".join(items) or '<span class="muted">Abhi koi output nahi — Render chalao.</span>'
+
+
+@app.post("/film/<slug>/job")
+def job(slug: str):
+    slug = secure_filename(slug)
+    action = request.form.get("action", "render")
+    extra: list[str] = []
+    if action == "build":
+        extra = ["--model", request.form.get("model", "kling-3.0"), "--shots", request.form.get("shots_count", "0")]
+    if action == "voice":
+        extra = ["--lang", request.form.get("lang", "hi-IN")]
+        if request.form.get("silent") == "1":
+            extra.append("--silent")
+    if action == "postpro" and request.form.get("ratios"):
+        extra = ["--ratios", *request.form.get("ratios").split()]
+    key = JOBS.start(slug, action, extra)
+    return jsonify({"job": key})
+
+
+@app.get("/api/jobs/<key>")
+def job_status(key: str):
+    data = JOBS.status(key)
+    if data is None:
+        return jsonify({"state": "unknown"}), 404
+    return jsonify(data)
+
+
 @app.get("/status")
 def status():
     rows = "".join(f'<li><b>{s.name}</b> — {"✅ " if s.available else "❌ "}{s.detail}</li>' for s in check_providers())
@@ -517,11 +519,6 @@ def status():
 # ---------------------------------------------------------------------------
 GENRES = ["scifi", "action", "romance", "horror", "documentary", "commercial", "drama"]
 MODELS = ["kling-3.0", "veo-3.1-fast", "ltx-2.5-pro", "minimax-h3", "qwen-image-3", "nano-banana-2", "gpt-image-2"]
-
-
-def json_safe(v: str) -> str:
-    import json
-    return json.dumps(v)
 
 
 def render_page(body: str) -> str:
@@ -558,6 +555,7 @@ button.small { padding:7px 12px; font-size:12px; }
 .poster { width:128px; height:72px; object-fit:cover; border-radius:8px; flex-shrink:0; }
 .poster.placeholder { display:flex; align-items:center; justify-content:center; background:var(--card2); font-size:28px; }
 .film-title { font-size:16px; font-weight:700; margin-bottom:6px; }
+.lang { font-size:11px; color:var(--accent); }
 .film-meta { display:flex; gap:10px; flex-wrap:wrap; font-size:12px; color:var(--muted); }
 .badge { background:rgba(224,90,90,.18); color:var(--accent); border-radius:20px; padding:2px 10px; font-weight:600; text-transform:uppercase; font-size:11px; }
 .ok { color:var(--ok); }
@@ -568,8 +566,8 @@ button.small { padding:7px 12px; font-size:12px; }
 .scene-num { color:var(--accent); font-size:11px; font-weight:700; letter-spacing:1px; }
 .scene-heading { font-size:14px; font-weight:600; color:var(--accent2); }
 .scene-action,.scene-narr { font-size:13px; color:#c8cade; margin:4px 0; }
+.scene-dialogue { font-size:13px; color:var(--accent2); margin:6px 0; font-style:italic; }
 .shot-row { display:flex; gap:12px; align-items:center; border-top:1px dashed var(--line); padding:8px 0 0; margin-top:8px; }
-.shot { display:flex; gap:10px; align-items:center; font-size:12px; }
 .shot-id { color:var(--muted); font-weight:700; }
 .shot-cam { color:var(--accent2); min-width:110px; }
 .shot-form { display:flex; gap:8px; align-items:center; flex-wrap:wrap; flex:1; }
@@ -607,7 +605,7 @@ ul.status li { padding:8px 0; border-bottom:1px dashed var(--line); font-size:13
 <body>
 <header>
   <h1>🎬 AI FILM STUDIO</h1>
-  <span class="tag">script → shots → voice → music → render</span>
+  <span class="tag">script → shots → voice → music → edit → render</span>
   <a href="/status">Provider Status</a>
 </header>
 <main>__BODY__</main>
@@ -620,6 +618,7 @@ _INDEX_TMPL = """
   <form class="grid" method="post" action="/new">
     <label style="grid-column:span 2">Title <input name="title" required placeholder="Neon Rain"></label>
     <label>Genre <select name="genre">{genres}</select></label>
+    <label>Language <select name="lang"><option value="en">English</option><option value="hi">हिन्दी</option></select></label>
     <label>Scenes <input name="scenes" type="number" value="3" min="1" max="12"></label>
     <label>Shots/scene <input name="shots" type="number" value="2" min="1" max="8"></label>
     <label>Shot duration (s) <input name="duration" type="number" value="4" step="0.5" min="2" max="15"></label>
@@ -651,7 +650,7 @@ _FILM_TMPL = """
   <h2>🎛 Studio Controls</h2>
   <div class="actions">
     <button class="small" onclick="runJob('build')">🎥 Generate Assets</button>
-    <button class="small" onclick="runJob('voice')">🗣 Voiceover (Hindi)</button>
+    <button class="small" onclick="runJob('voice')">🗣 Voiceover</button>
     <button class="small" onclick="runJob('sound')">🎵 Soundtrack</button>
     <button class="small" onclick="runJob('render')">🎞 Render Movie</button>
     <button class="small" onclick="runJob('trailer')">🍿 Trailer</button>
@@ -662,9 +661,10 @@ _FILM_TMPL = """
     <button class="small ghost" onclick="runJob('publish')">📤 Publish to YouTube</button>
   </div>
   <div class="note">
-    Assets model: <select id="job-model">{models}</select>
+    Model: <select id="job-model">{models}</select>
     &nbsp; Voice lang: <select id="job-lang"><option>hi-IN</option><option>en-IN</option><option>en-US</option></select>
     &nbsp; <label style="display:inline"><input type="checkbox" id="job-silent"> offline silent</label>
+    &nbsp; <span class="muted">* dissolve transitions + sfx + grade auto-apply on render</span>
   </div>
   <div id="logbox" style="display:none;margin-top:12px;"><div id="log"></div></div>
 </div>

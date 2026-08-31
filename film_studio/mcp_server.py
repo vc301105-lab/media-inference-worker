@@ -92,11 +92,14 @@ def plan_new_film(
     scenes: int = 3,
     shots: int = 2,
     duration: float = 4.0,
+    lang: str = "en",
 ) -> dict:
-    """Create a new film: generates script + storyboard prompts. Returns slug + shot prompts."""
+    """Create a new film: generates script + storyboard prompts (lang: en|hi). Returns slug + prompts."""
     if genre not in GENRES:
         raise ValueError(f"genre must be one of {GENRES}")
-    project = plan_film(title, logline, genre, scenes=max(1, scenes), shots=max(1, shots), duration=max(2.0, min(duration, 15)))
+    if lang not in ("en", "hi"):
+        raise ValueError("lang must be en|hi")
+    project = plan_film(title, logline, genre, scenes=max(1, scenes), shots=max(1, shots), duration=max(2.0, min(duration, 15)), lang=lang)
     return {
         "slug": project.film.slug,
         "title": project.film.title,
@@ -109,12 +112,12 @@ def plan_new_film(
 
 
 @mcp.tool()
-def generate_assets(film_slug: str, model: str = "kling-3.0", shots_per_scene: int = 0) -> dict:
-    """Generate AI image/video assets for every shot (or N per scene). Requires network + API key."""
+def generate_assets(film_slug: str, model: str = "kling-3.0", shots_per_scene: int = 0, workers: int = 1) -> dict:
+    """Generate AI image/video assets for every shot (or N per scene). workers>1 = parallel."""
     if model not in MODELS:
         raise ValueError(f"model must be one of {MODELS}")
     project = _project(film_slug)
-    make_project(project, shots=shots_per_scene, model=model)
+    make_project(project, shots=shots_per_scene, model=model, workers=min(max(workers, 1), 4))
     save_project(project)
     return {"slug": film_slug, "model": model, "assets": [s.local_asset for s in project.shots if s.local_asset]}
 
@@ -141,10 +144,10 @@ def soundtrack(film_slug: str) -> dict:
 
 
 @mcp.tool()
-def render_final(film_slug: str) -> dict:
-    """Render the complete movie (music + subtitles) from generated assets."""
+def render_final(film_slug: str, transition: str = "dissolve", sfx: bool = True) -> dict:
+    """Render the complete movie (transitions + music + sfx + subtitles + cinematic look)."""
     project = _project(film_slug)
-    movie = produce_film(project)
+    movie = produce_film(project, transition=transition, sfx=sfx)
     return {"slug": film_slug, "movie": str(movie), "size_mb": round(movie.stat().st_size / 1e6, 2)}
 
 

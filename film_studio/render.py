@@ -348,11 +348,13 @@ def export_aspect(project: Project, movie: Path, ratio: str = "9:16") -> Path:
     return out
 
 
-def render_film(project: Project, with_music: bool = True, cinematic: bool = True) -> Path:
+def render_film(project: Project, with_music: bool = True, cinematic: bool = True, transition: str = "dissolve", sfx: bool = True) -> Path:
     """Render the whole film: title card + per-shot clips (+ narration where available).
 
     - Narration longer than the scene → last shot auto-extends (voice never cut off).
-    - cinematic=True applies 2.35:1 letterbox + film grain + vignette at the end.
+    - transition: dissolve/fade-soft/wipe/circle between shots.
+    - sfx=True adds whooshes at scene boundaries + riser at title.
+    - cinematic=True applies genre grade + 2.35:1 letterbox + grain + vignette.
     Also writes subtitles.srt and mixes the genre soundtrack if it exists.
     """
     film = project.film
@@ -363,6 +365,7 @@ def render_film(project: Project, with_music: bool = True, cinematic: bool = Tru
 
     parts: list[Path] = []
     cues: list[tuple[float, float, str]] = []
+    sfx_events: list[tuple[float, str]] = []
     cursor = 0.0
 
     title = make_title_card(film.title.upper(), film.logline or film.genre, render_dir / "title.png")
@@ -374,6 +377,7 @@ def render_film(project: Project, with_music: bool = True, cinematic: bool = Tru
         p.stem.replace("scene-", ""): p for p in (project.root / "voice").glob("scene-*.mp3")
     }
 
+    sfx_events.append((0.0, "riser"))
     for scene in film.scenes:
         scene_audio = narration.get(str(scene.number))
         # Sync: if narration audio is longer than the scene's shots, extend the last shot
@@ -382,6 +386,8 @@ def render_film(project: Project, with_music: bool = True, cinematic: bool = Tru
             have = sum(s.duration for s in scene.shots)
             if need > have + 0.4:
                 scene.shots[-1].duration += (need - have)
+        if scene.number > 1:
+            sfx_events.append((cursor, "whoosh"))
         scene_start = cursor
         scene_len = 0.0
         for shot in scene.shots:
@@ -419,7 +425,17 @@ def render_film(project: Project, with_music: bool = True, cinematic: bool = Tru
     parts.append(_make_clip(credit, credit_silent, 3.0, clips_dir / "credits.mp4", kenburns=False))
     cursor += 3.0
 
-    movie = _concat(parts, deliverable)
+    if transition != "none" and len(parts) > 1:
+        from .transitions import apply_transitions
+
+        movie = apply_transitions(parts, deliverable, transition=transition, duration=0.4)
+    else:
+        movie = _concat(parts, deliverable)
+
+    if sfx and sfx_events:
+        from .soundfx import mix_sfx
+
+        mix_sfx(movie, sfx_events, render_dir / "sfx")
 
     # sound design + subtitles
     theme = project.root / "sound" / f"{film.slug}-theme.wav"
@@ -428,9 +444,9 @@ def render_film(project: Project, with_music: bool = True, cinematic: bool = Tru
     if cues:
         write_srt(project, cues)
 
-    # cinematic finish: letterbox + grain + vignette
+    # cinematic finish: genre grade + letterbox + grain + vignette
     if cinematic:
         from .finish import apply_film_look
 
-        apply_film_look(movie)
+        apply_film_look(movie, genre=film.genre)
     return movie

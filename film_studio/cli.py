@@ -31,8 +31,10 @@ def _find_project(args) -> Path:
 
 
 def cmd_new(args) -> int:
-    _p(f"🎬 Planning film: {args.title!r} ({args.genre})")
-    project = plan_film(args.title, args.logline, args.genre, scenes=args.scenes, shots=args.shots, duration=args.duration)
+    _p(f"🎬 Planning film: {args.title!r} ({args.genre}, {args.lang})")
+    project = plan_film(args.title, args.logline, args.genre, scenes=args.scenes, shots=args.shots, duration=args.duration, lang=args.lang)
+    if args.lang == "hi":
+        _p("   📝 Hindi screenplay + dialogue ready (Devanagari)")
     _p(f"   Project folder: {project.root}")
     _p(f"   Scenes: {len(project.film.scenes)} | Shots: {len(project.shots)}")
     _p(f"   Screenplay: {project.root / 'script' / 'screenplay.txt'}")
@@ -53,8 +55,8 @@ def cmd_plan(args) -> int:
 def cmd_build(args) -> int:
     load_env()
     project = load_project(_find_project(args))
-    _p(f"🎥 Generating assets for {project.film.title} (model: {args.model})")
-    make_project(project, shots=args.shots, duration=args.duration, model=args.model, on_status=lambda s: _p(f"      status: {s}"))
+    _p(f"🎥 Generating assets for {project.film.title} (model: {args.model}, workers={args.workers})")
+    make_project(project, shots=args.shots, duration=args.duration, model=args.model, workers=args.workers, on_status=lambda s: _p(f"      status: {s}"))
     _p("✅ Assets generated. Next: film-studio voice")
     return 0
 
@@ -71,8 +73,8 @@ def cmd_voice(args) -> int:
 
 def cmd_render(args) -> int:
     project = load_project(_find_project(args))
-    _p("🎞 Rendering final film…")
-    out = produce_film(project, cinematic=not args.no_look)
+    _p(f"🎞 Rendering final film… ({args.transition} transitions, sfx={not args.no_sfx})")
+    out = produce_film(project, cinematic=not args.no_look, transition=args.transition, sfx=not args.no_sfx)
     _p(f"✅ Movie ready: {out}")
     _p(f"   Runtime: {project.film.duration:.0f}s | {out.stat().st_size / 1e6:.1f} MB")
     return 0
@@ -229,17 +231,17 @@ def cmd_all(args) -> int:
     _p("=" * 60)
     _p("🎬 AI FILM STUDIO — FULL PRODUCTION")
     _p("=" * 60)
-    project = plan_film(args.title, args.logline, args.genre, scenes=args.scenes, shots=args.shots, duration=args.duration)
+    project = plan_film(args.title, args.logline, args.genre, scenes=args.scenes, shots=args.shots, duration=args.duration, lang=args.lang)
     _p(f"[1/4] Project planned → {project.root}")
 
     _p("[2/4] Generating shots…")
-    make_project(project, shots=args.shots, duration=args.duration, model=args.model, on_status=lambda s: _p(f"      status: {s}"))
+    make_project(project, shots=args.shots, duration=args.duration, model=args.model, workers=args.workers, on_status=lambda s: _p(f"      status: {s}"))
 
     _p("[3/4] Generating narration…")
-    generate_narration(project, voice=args.voice, lang=args.lang, force_silent=args.silent)
+    generate_narration(project, voice=args.voice, lang=args.voice_lang, force_silent=args.silent)
 
-    _p("[4/4] Rendering film (music + subtitles)…")
-    out = produce_film(project)
+    _p("[4/4] Rendering film (transitions + music + sfx + subtitles)…")
+    out = produce_film(project, transition=args.transition, sfx=not args.no_sfx)
     _p("=" * 60)
     _p(f"✅ FILM COMPLETE: {out}")
     _p(f"   Runtime ~{project.film.duration:.0f}s | {out.stat().st_size / 1e6:.1f} MB")
@@ -278,6 +280,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("title")
     sp.add_argument("--logline", default="")
     sp.add_argument("--genre", default="drama", choices=["scifi", "action", "romance", "horror", "documentary", "commercial", "drama"])
+    sp.add_argument("--lang", default="en", choices=["en", "hi"], help="Screenplay/narration language")
     sp.add_argument("--scenes", type=int, default=3)
     sp.add_argument("--shots", type=int, default=2)
     sp.add_argument("--duration", type=float, default=4.0)
@@ -287,6 +290,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("build", help="Generate shot assets (images/videos)", parents=[common])
     sp.add_argument("--model", default="kling-3.0", choices=["kling-3.0", "veo-3.1-fast", "ltx-2.5-pro", "minimax-h3", "qwen-image-3", "nano-banana-2", "gpt-image-2"])
     sp.add_argument("--shots", type=int, default=0, help="Shots per scene (0 = all shots)")
+    sp.add_argument("--workers", type=int, default=1, help="Parallel generations (1-4)")
     sp.add_argument("--duration", type=float, default=4.0)
 
     sp = sub.add_parser("voice", help="Generate voiceover narration", parents=[common])
@@ -296,6 +300,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = sub.add_parser("render", help="Render the final movie", parents=[common])
     sp.add_argument("--no-look", action="store_true", help="Skip cinematic letterbox/grain")
+    sp.add_argument("--no-sfx", action="store_true", help="Skip whoosh/riser sound effects")
+    sp.add_argument("--transition", default="dissolve", choices=["dissolve", "fade-soft", "wipe", "circle", "none"])
 
     sp = sub.add_parser("finish", help="Apply cinematic look to rendered movie", parents=[common])
     sp.add_argument("--grain", type=int, default=6, help="Film grain strength (0=off)")
@@ -332,12 +338,16 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("title")
     sp.add_argument("--logline", default="")
     sp.add_argument("--genre", default="drama", choices=["scifi", "action", "romance", "horror", "documentary", "commercial", "drama"])
+    sp.add_argument("--lang", default="en", choices=["en", "hi"])
     sp.add_argument("--scenes", type=int, default=3)
     sp.add_argument("--shots", type=int, default=2)
+    sp.add_argument("--workers", type=int, default=1, help="Parallel generations (1-4)")
     sp.add_argument("--duration", type=float, default=4.0)
     sp.add_argument("--model", default="kling-3.0", choices=["kling-3.0", "veo-3.1-fast", "ltx-2.5-pro", "minimax-h3", "qwen-image-3", "nano-banana-2", "gpt-image-2"])
+    sp.add_argument("--transition", default="dissolve", choices=["dissolve", "fade-soft", "wipe", "circle", "none"])
+    sp.add_argument("--no-sfx", action="store_true")
     sp.add_argument("--voice", default="auto")
-    sp.add_argument("--lang", default="en-IN", help="en-IN, hi-IN, en-US, en-GB…")
+    sp.add_argument("--voice-lang", default="hi-IN", help="en-IN, hi-IN, en-US, en-GB…")
     sp.add_argument("--silent", action="store_true", help="Force silent tracks (offline mode)")
     sp.add_argument("--poster", action="store_true", help="Also make poster + thumbnail")
     sp.add_argument("--ratios", nargs="*", default=[], choices=["9:16", "1:1"], help="Extra platform exports")
