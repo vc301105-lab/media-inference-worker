@@ -22,6 +22,7 @@ from .config import check_providers, load_env
 from .pipeline import plan_film
 from .project import FILMS_DIR, load_project
 from .render import _ffmpeg
+from .review import load_review
 
 app = Flask(__name__)
 
@@ -223,6 +224,61 @@ def update_shot(slug: str):
     return redirect(url_for("film", slug=slug))
 
 
+@app.post("/film/<slug>/shot/move")
+def move_shot(slug: str):
+    root = FILMS_DIR / secure_filename(slug)
+    project = load_project(root)
+    try:
+        idx = int(request.form.get("index", "-1"))
+    except ValueError:
+        idx = -1
+    from .project import move_shot as _move, save_project
+
+    _move(project, idx, request.form.get("dir", "right"))
+    save_project(project)
+    return redirect(url_for("film", slug=slug))
+
+
+@app.post("/film/<slug>/shot/delete")
+def delete_shot_route(slug: str):
+    root = FILMS_DIR / secure_filename(slug)
+    project = load_project(root)
+    try:
+        idx = int(request.form.get("index", "-1"))
+    except ValueError:
+        idx = -1
+    from .project import delete_shot as _delete, save_project
+
+    _delete(project, idx)
+    save_project(project)
+    return redirect(url_for("film", slug=slug))
+
+
+@app.post("/film/<slug>/shot/add")
+def add_shot_route(slug: str):
+    root = FILMS_DIR / secure_filename(slug)
+    project = load_project(root)
+    try:
+        scene_no = int(request.form.get("scene", "1"))
+    except ValueError:
+        scene_no = 1
+    from .project import add_shot as _add, save_project
+
+    _add(project, scene_no, duration=float(request.form.get("duration", 4)))
+    save_project(project)
+    return redirect(url_for("film", slug=slug))
+
+
+@app.post("/film/<slug>/review")
+def run_review(slug: str):
+    root = FILMS_DIR / secure_filename(slug)
+    project = load_project(root)
+    from .review import review_project
+
+    review_project(project)
+    return redirect(url_for("film", slug=slug))
+
+
 @app.post("/film/<slug>/delete")
 def delete_film(slug: str):
     from .project import delete_project
@@ -250,6 +306,10 @@ def film(slug: str):
           </video>
         </div>'''
     downloads = _download_links(root, slug)
+    from .review import load_review
+
+    review = load_review(project)
+    review_html = _review_html(review) if review else ""
     return render_page(
         _FILM_TMPL.format(
             title=project.film.title,
@@ -264,8 +324,33 @@ def film(slug: str):
             downloads=downloads,
             slug=slug,
             models=" ".join(f'<option value="{m}">{m}</option>' for m in MODELS),
+            review_html=review_html,
         )
     )
+
+
+def _review_html(review: dict) -> str:
+    scores = " ".join(
+        f'<span class="score { "ok" if float(r["score"]) >= 6.5 else ("weak" if float(r["score"]) >= 5 else "bad") }">#{r["shot"]} {r["score"]}</span>'
+        for r in review.get("details", [])
+        if r.get("score") is not None
+    )
+    recs = "".join(f"<li>{r}</li>" for r in review.get("recommendations", [])[:8]) or "<li>Sab shots strong — koi fix nahi chahiye ✅</li>"
+    return f"""
+    <div class="card">
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+        <h2 style="margin:0;">🔍 AI Director Review</h2>
+        <span class="avg">Avg {review['average_score']}/10 · {review['shots_analyzed']} shots</span>
+      </div>
+      <div class="scores">{scores or '<span class="muted">Shots generate hone ke baad review karo</span>'}</div>
+      <ul class="recs">{recs}</ul>
+      <div style="margin-top:8px;">
+        <form method="post" action="/film/{review['film']}/review" style="display:inline">
+          <button class="small">🔄 Re-run Review</button>
+        </form>
+        <a class="dl" href="/film/{review['film']}/movie/subtitles.srt" style="display:none"></a>
+      </div>
+    </div>"""
 
 
 def _scene_block(project, scene) -> str:
@@ -275,6 +360,8 @@ def _scene_block(project, scene) -> str:
         if s is scene:
             break
         offset += len(s.shots)
+    review = load_review(project)
+    scores = {r["shot"]: r for r in (review or {}).get("details", [])}
     shots = ""
     for s in scene.shots:
         asset_ok = s.local_asset and Path(s.local_asset).exists()
@@ -284,8 +371,14 @@ def _scene_block(project, scene) -> str:
             if asset_ok
             else '<div class="shot-thumb ph">🎬</div>'
         )
+        score = scores.get(s.index + 1)
+        badge = ""
+        if score and score.get("score") is not None:
+            cls = "score-ok" if score["score"] >= 6.5 else ("score-weak" if score["score"] >= 5 else "score-bad")
+            badge = f'<span class="shot-score {cls}" title="{"; ".join(score.get("flags") or [])}">{score["score"]}</span>'
         shots += f"""
         <div class="shot-row">
+          {thumb}
           <form method="post" action="/film/{project.film.slug}/shot" class="shot-form">
             <input type="hidden" name="index" value="{s.index}">
             <span class="shot-id">#{s.index + 1}</span>
@@ -295,7 +388,22 @@ def _scene_block(project, scene) -> str:
             <button class="small ghost" type="submit">💾</button>
             {status}
           </form>
-          {thumb}
+          {badge}
+          <form method="post" action="/film/{project.film.slug}/shot/move" style="display:inline">
+            <input type="hidden" name="index" value="{s.index}">
+            <input type="hidden" name="dir" value="left">
+            <button class="mini" title="Move left">◀</button>
+          </form>
+          <form method="post" action="/film/{project.film.slug}/shot/move" style="display:inline">
+            <input type="hidden" name="index" value="{s.index}">
+            <input type="hidden" name="dir" value="right">
+            <button class="mini" title="Move right">▶</button>
+          </form>
+          <form method="post" action="/film/{project.film.slug}/shot/delete" style="display:inline"
+                onsubmit="return confirm('Shot delete karna hai?')">
+            <input type="hidden" name="index" value="{s.index}">
+            <button class="mini" title="Delete" style="color:#ff7b7b;">✕</button>
+          </form>
         </div>"""
     return f"""
     <div class="scene">
@@ -303,6 +411,14 @@ def _scene_block(project, scene) -> str:
       <div class="scene-action">{scene.action}</div>
       {f'<div class="scene-narr">🗣 {scene.narration}</div>' if scene.narration else ''}
       {shots}
+      <div class="scene-actions">
+        <form method="post" action="/film/{project.film.slug}/shot/add" style="display:inline">
+          <input type="hidden" name="scene" value="{scene.number}">
+          <input type="hidden" name="duration" value="{scene.shots[0].duration if scene.shots else 4}">
+          <button class="small ghost">＋ Add Take</button>
+        </form>
+        <span class="muted">◀ ▶ reorder · ✕ delete · 💾 save prompt</span>
+      </div>
     </div>"""
 
 
@@ -461,6 +577,21 @@ button.small { padding:7px 12px; font-size:12px; }
 .shot-dur { width:70px; padding:7px 8px; }
 .shot-thumb { width:110px; height:62px; object-fit:cover; border-radius:6px; border:1px solid var(--line); flex-shrink:0; }
 .shot-thumb.ph { display:flex; align-items:center; justify-content:center; background:var(--card2); font-size:20px; }
+button.mini { background:var(--card2); border:1px solid var(--line); color:var(--accent2); border-radius:6px; width:28px; height:28px; padding:0; font-size:13px; cursor:pointer; }
+button.mini:hover { border-color:var(--accent); }
+.shot-score { min-width:34px; text-align:center; border-radius:6px; padding:3px 6px; font-weight:700; font-size:12px; }
+.score-ok { background:rgba(90,208,138,.18); color:#5ad08a; }
+.score-weak { background:rgba(224,178,90,.18); color:#e0b25a; }
+.score-bad { background:rgba(224,90,90,.22); color:#ff7b7b; }
+.scores { display:flex; gap:8px; flex-wrap:wrap; margin:10px 0; }
+.score { border-radius:16px; padding:4px 12px; font-size:12px; font-weight:700; }
+.score.ok { background:rgba(90,208,138,.18); color:#5ad08a; }
+.score.weak { background:rgba(224,178,90,.18); color:#e0b25a; }
+.score.bad { background:rgba(224,90,90,.22); color:#ff7b7b; }
+.avg { font-size:12px; color:var(--muted); }
+.recs { margin:8px 0 0; padding-left:18px; font-size:13px; color:#c8cade; }
+.recs li { margin:3px 0; }
+.scene-actions { display:flex; gap:8px; margin-top:10px; align-items:center; }
 a.danger { color:#ff7b7b; font-size:12px; }
 textarea { background:var(--card2); border:1px solid var(--line); color:#fff; border-radius:8px; padding:10px 12px; font-size:14px; width:100%; resize:vertical; }
 .dl { display:inline-block; background:var(--card2); border:1px solid var(--line); color:var(--accent2); text-decoration:none; border-radius:8px; padding:8px 12px; font-size:12px; margin:4px 6px 0 0; }
@@ -525,6 +656,7 @@ _FILM_TMPL = """
     <button class="small" onclick="runJob('render')">🎞 Render Movie</button>
     <button class="small" onclick="runJob('trailer')">🍿 Trailer</button>
     <button class="small" onclick="runJob('finish')">🎬 Cinematic Look</button>
+    <button class="small" onclick="runJob('review')">🔍 AI Review</button>
     <button class="small" onclick="runJob('postpro')">🖼 Poster + Subtitles</button>
     <button class="small ghost" onclick="runJob('export')">📱 9:16 + 1:1 Export</button>
     <button class="small ghost" onclick="runJob('publish')">📤 Publish to YouTube</button>
@@ -543,10 +675,13 @@ _FILM_TMPL = """
   <div style="margin-top:10px;"><b class="muted">Downloads:</b> {downloads}</div>
 </div>
 
+{review_html}
+
 <div class="card">
-  <h2>📋 Storyboard <span class="muted">(prompt/duration edit karke 💾 save karo)</span></h2>
+  <h2>📋 Timeline Editor <span class="muted">— reorder, add take, delete, edit prompt</span></h2>
   {scenes}
 </div>
+<p class="note">💡 Tip: 🔍 AI Review chalao — weak shots par score <b style="color:#ff7b7b">red</b> dikhega. Unhe regen karne ke liye CLI: <code>film_studio shot 3 --model kling-3.0</code></p>
 
 <div class="card">
   <h2>🗑 Danger</h2>

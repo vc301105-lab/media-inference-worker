@@ -125,6 +125,24 @@ def cmd_delete(args) -> int:
     return 0
 
 
+def cmd_review(args) -> int:
+    project = load_project(_find_project(args))
+    _p(f"🔍 AI review of '{project.film.title}'…")
+    from .review import review_project
+
+    report = review_project(project, threshold=args.threshold)
+    _p(f"   Shots analyzed: {report['shots_analyzed']} | Average: {report['average_score']}/10")
+    weak = report["weak_shots"]
+    if weak:
+        _p(f"   ⚠{len(weak)} weak shots: {weak} — regenerate karne ke liye: film_studio shot <no>")
+        for rec in report["recommendations"][:10]:
+            _p(f"     • {rec}")
+    else:
+        _p("   ✅ Sab shots strong hain!")
+    _p(f"   Report: {project.root / 'render' / 'review.json'}")
+    return 0
+
+
 def cmd_publish(args) -> int:
     project = load_project(_find_project(args))
     movie = project.root / "movie" / f"{project.film.slug}.mp4"
@@ -299,6 +317,9 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--title", default="")
     sp.add_argument("--privacy", default="public", choices=["public", "unlisted", "private"])
     sp.add_argument("--tags", default="AI film, short film, AI generated")
+
+    sp = sub.add_parser("review", help="AI quality review of all shots", parents=[common])
+    sp.add_argument("--threshold", type=float, default=6.0, help="Score below this = weak")
     sub.add_parser("sound", help="Generate genre soundtrack + mix into movie", parents=[common])
 
     sp = sub.add_parser("postpro", help="Poster + subtitles + platform exports", parents=[common])
@@ -341,6 +362,7 @@ def main(argv=None) -> int:
             "rename": cmd_rename,
             "delete": cmd_delete,
             "publish": cmd_publish,
+            "review": cmd_review,
             "sound": cmd_sound,
             "postpro": cmd_postpro,
             "export": cmd_export,

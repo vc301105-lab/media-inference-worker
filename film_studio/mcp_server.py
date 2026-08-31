@@ -165,6 +165,47 @@ def postproduction(film_slug: str, export_ratios: list[str] | None = None) -> di
 
 
 @mcp.tool()
+def review_film(film_slug: str, threshold: float = 6.0) -> dict:
+    """AI quality review: score every generated shot; weak shots recommended for regenerate."""
+    project = _project(film_slug)
+    from .review import review_project
+
+    report = review_project(project, threshold=threshold)
+    return {
+        "slug": film_slug,
+        "average_score": report["average_score"],
+        "weak_shots": report["weak_shots"],
+        "recommendations": report["recommendations"],
+    }
+
+
+@mcp.tool()
+def timeline_edit(
+    film_slug: str,
+    action: str,
+    shot_index: int,
+    direction: str = "right",
+    duration: float = 4.0,
+) -> dict:
+    """Timeline edit: 'move' (left/right), 'delete', or 'add' a take to a scene (shot_index = scene number for add)."""
+    project = _project(film_slug)
+    from .project import add_shot, delete_shot, move_shot, save_project
+
+    if action == "move":
+        ok = move_shot(project, shot_index, direction)
+    elif action == "delete":
+        ok = delete_shot(project, shot_index)
+    elif action == "add":
+        ok = add_shot(project, shot_index, duration=duration)
+    else:
+        raise ValueError("action must be move|delete|add")
+    if not ok:
+        raise ValueError(f"{action} failed — invalid index or would leave empty scene")
+    save_project(project)
+    return {"slug": film_slug, "action": action, "shots": len(project.shots)}
+
+
+@mcp.tool()
 def cinematic_look(film_slug: str, grain: int = 6, letterbox: bool = True) -> dict:
     """Apply 2.35:1 letterbox + film grain + vignette to the rendered movie (cinematic finish)."""
     project = _project(film_slug)

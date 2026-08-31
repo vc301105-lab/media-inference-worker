@@ -59,6 +59,7 @@ Sab actions background mein chalte hain aur log live update hota hai — page re
 | `rename "Naya Title"` | Film ka naam badlo |
 | `delete --yes` | Film project delete karo |
 | `publish --privacy public` | YouTube par upload karo |
+| `review --threshold 6` | AI quality review — har shot ka score + regenerate recommendation |
 | `sound` | Genre soundtrack generate karo + movie mein mix karo |
 | `postpro --ratios 9:16 1:1` | Poster + subtitles + platform exports |
 | `export --ratio 9:16` | Vertical / square export (Reels, Shorts) |

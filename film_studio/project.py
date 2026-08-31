@@ -118,7 +118,70 @@ def save_project(project: Project) -> None:
     (project.root / "film.json").write_text(json.dumps(data, indent=2, ensure_ascii=False))
 
 
-def rename_project(root: Path, new_title: str) -> Project:
+def reindex_shots(project: Project) -> None:
+    """Reset shot.index to sequential 0-based numbering across all scenes."""
+    idx = 0
+    for scene in project.film.scenes:
+        for shot in scene.shots:
+            shot.index = idx
+            idx += 1
+
+
+def move_shot(project: Project, index: int, direction: str) -> bool:
+    """Move a shot one step left/right across scenes; returns True if moved."""
+    flat = project.shots
+    if not (0 <= index < len(flat)) or direction not in ("left", "right"):
+        return False
+    target = index - 1 if direction == "left" else index + 1
+    if not (0 <= target < len(flat)):
+        return False
+    # find owning scenes
+    def locate(pos):
+        count = 0
+        for scene in project.film.scenes:
+            if count <= pos < count + len(scene.shots):
+                return scene, pos - count
+            count += len(scene.shots)
+        return None, -1
+
+    s1, i1 = locate(index)
+    s2, i2 = locate(target)
+    if s1 is None or s2 is None:
+        return False
+    s1.shots[i1], s2.shots[i2] = s2.shots[i2], s1.shots[i1]
+    reindex_shots(project)
+    return True
+
+
+def delete_shot(project: Project, index: int) -> bool:
+    """Remove a shot (keeps at least one shot per scene); returns True if removed."""
+    count = 0
+    for scene in project.film.scenes:
+        if count <= index < count + len(scene.shots):
+            if len(scene.shots) <= 1:
+                return False
+            del scene.shots[index - count]
+            reindex_shots(project)
+            return True
+        count += len(scene.shots)
+    return False
+
+
+def add_shot(project: Project, scene_number: int, duration: float = 4.0, alt: bool = True) -> bool:
+    """Duplicate the scene's last shot as an alternate take; returns True if added."""
+    scene = next((s for s in project.film.scenes if s.number == scene_number), None)
+    if scene is None or not scene.shots:
+        return False
+    src = scene.shots[-1]
+    new = Shot(
+        index=0,
+        prompt=src.prompt + (", alternate take, slightly different framing" if alt else ""),
+        duration=duration,
+        camera=src.camera,
+    )
+    scene.shots.append(new)
+    reindex_shots(project)
+    return True
     """Update the film title (rewrites movie filename on next render) and save."""
     import shutil
 
