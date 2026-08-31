@@ -33,7 +33,7 @@ def _expr(freqs: list[float], seed: float) -> str:
     return "+".join(terms)
 
 
-def generate_theme(project, duration: float | None = None) -> Path:
+def generate_theme(project, duration: float | None = None, filename: str | None = None) -> Path:
     """Render a looping ambient bed for the film's genre → sound/<slug>-theme.wav."""
     from .render import _ffmpeg
 
@@ -47,7 +47,7 @@ def generate_theme(project, duration: float | None = None) -> Path:
 
     out_dir = project.root / "sound"
     out_dir.mkdir(parents=True, exist_ok=True)
-    out = out_dir / f"{film.slug}-theme.wav"
+    out = out_dir / (filename or f"{film.slug}-theme.wav")
 
     inputs = ["-f", "lavfi", "-i", f"aevalsrc={expr}:s=44100:d={dur:.1f}"]
     filter_parts: list[str] = []

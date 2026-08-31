@@ -78,6 +78,16 @@ def cmd_render(args) -> int:
     return 0
 
 
+def cmd_trailer(args) -> int:
+    project = load_project(_find_project(args))
+    _p("🎬 Making trailer (fast cuts + music + COMING SOON)…")
+    from .trailer import make_trailer
+
+    out = make_trailer(project)
+    _p(f"✅ Trailer ready: {out}")
+    return 0
+
+
 def cmd_sound(args) -> int:
     project = load_project(_find_project(args))
     _p(f"🎵 Generating {project.film.genre} soundtrack…")
@@ -206,6 +216,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--silent", action="store_true", help="Force silent tracks (offline mode)")
 
     sub.add_parser("render", help="Render the final movie", parents=[common])
+    sub.add_parser("trailer", help="Make a fast-cut teaser trailer", parents=[common])
     sub.add_parser("sound", help="Generate genre soundtrack + mix into movie", parents=[common])
 
     sp = sub.add_parser("postpro", help="Poster + subtitles + platform exports", parents=[common])
@@ -242,6 +253,7 @@ def main(argv=None) -> int:
             "build": cmd_build,
             "voice": cmd_voice,
             "render": cmd_render,
+            "trailer": cmd_trailer,
             "sound": cmd_sound,
             "postpro": cmd_postpro,
             "export": cmd_export,

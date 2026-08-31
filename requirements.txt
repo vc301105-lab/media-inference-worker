@@ -3,3 +3,4 @@ pillow
 imageio-ffmpeg
 edge-tts
 flask
+mcp<2

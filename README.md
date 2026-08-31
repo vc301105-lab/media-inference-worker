@@ -53,6 +53,7 @@ Sab actions background mein chalte hain aur log live update hota hai — page re
 | `build --model M` | AI se shots generate karo (images/videos) |
 | `voice` | Narration generate karo (voiceover) |
 | `render` | Final movie render karo (music + subtitles ke saath) |
+| `trailer` | Fast-cut teaser trailer banao (COMING SOON + music) |
 | `sound` | Genre soundtrack generate karo + movie mein mix karo |
 | `postpro --ratios 9:16 1:1` | Poster + subtitles + platform exports |
 | `export --ratio 9:16` | Vertical / square export (Reels, Shorts) |
@@ -99,6 +100,31 @@ Keys `.env` mein add karo:
 ELEVENLABS_API_KEY=your_key_here
 RUNWAY_API_KEY=your_key_here    # (plugin optional)
 ```
+
+## 🤖 MCP Server — AI Agent se film banao
+
+Studio ab **MCP server** hai (same style jaise Runway/Sora/Kling/ElevenLabs official MCPs).
+Koi bhi AI agent (Claude Desktop, Cursor, OpenCode…) seedha film bana sakta hai:
+
+```bash
+.venv/bin/python -m film_studio.mcp_server
+```
+
+**Tools (10):** `studio_status` · `list_films` · `plan_new_film` · `generate_assets` ·
+`voiceover` · `soundtrack` · `render_final` · `postproduction` · `make_trailer_tool` · `direct_all_in_one`
+
+**Claude Desktop config** (`~/.config/Claude/claude_desktop_config.json`):
+```json
+"mcpServers": {
+  "ai-film-studio": {
+    "command": "/home/user/media-inference-worker/.venv/bin/python",
+    "args": ["-m", "film_studio.mcp_server"],
+    "cwd": "/home/user/media-inference-worker"
+  }
+}
+```
+
+Uske baad Claude se bolo: *"Ek sci-fi short film banao 'Neon Rain' — 4 scenes, kling-3.0, Hindi narration, trailer ke saath"* — agent khud pipeline chalayega.
 
 ## 🧩 Plugins (optional)
 

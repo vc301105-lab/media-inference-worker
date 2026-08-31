@@ -387,6 +387,7 @@ _FILM_TMPL = """
     <button class="small" onclick="runJob('voice')">🗣 Voiceover (Hindi)</button>
     <button class="small" onclick="runJob('sound')">🎵 Soundtrack</button>
     <button class="small" onclick="runJob('render')">🎞 Render Movie</button>
+    <button class="small" onclick="runJob('trailer')">🍿 Trailer</button>
     <button class="small" onclick="runJob('postpro')">🖼 Poster + Subtitles</button>
     <button class="small ghost" onclick="runJob('export')">📱 9:16 + 1:1 Export</button>
   </div>
