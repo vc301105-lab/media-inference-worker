@@ -53,6 +53,26 @@ def make_project(project: Project, shots: int = 0, duration: float = 4.0, model:
     return project
 
 
+def regenerate_shot(project: Project, shot_index: int, model: str = "kling-3.0", on_status=None) -> Shot:
+    """Regenerate a single shot asset by 0-based index; returns the updated shot."""
+    load_env()
+    from .config import VIDEO_MODELS
+    from .higgsfield import generate_image, generate_video
+
+    shot = project.shots[shot_index]
+    try:
+        if model in VIDEO_MODELS:
+            shot.video_asset = generate_video(shot.prompt, model=model, on_status=on_status)
+            shot.local_asset = shot.video_asset
+        else:
+            shot.image_asset = generate_image(shot.prompt, model=model, on_status=on_status)
+            shot.local_asset = shot.image_asset
+        save_project(project)
+    except Exception as exc:
+        raise RuntimeError(f"shot {shot_index + 1} regeneration failed: {exc}") from exc
+    return shot
+
+
 def produce_film(project: Project) -> Path:
     theme = project.root / "sound" / f"{project.film.slug}-theme.wav"
     if not theme.exists():

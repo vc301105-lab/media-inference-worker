@@ -78,6 +78,53 @@ def cmd_render(args) -> int:
     return 0
 
 
+def cmd_shot(args) -> int:
+    project = load_project(_find_project(args))
+    shot = project.shots[args.index - 1]
+    _p(f"🎯 Regenerating shot #{args.index}…\n   Prompt: {shot.prompt[:90]}")
+    from .pipeline import regenerate_shot
+
+    updated = regenerate_shot(project, args.index - 1, model=args.model, on_status=lambda s: _p(f"      status: {s}"))
+    _p(f"✅ Shot updated → {updated.local_asset}")
+    return 0
+
+
+def cmd_rename(args) -> int:
+    project = load_project(_find_project(args))
+    _p(f"✏ Renaming '{project.film.title}' → '{args.title}'")
+    from .project import rename_project
+
+    updated = rename_project(project.root, args.title)
+    _p(f"✅ {updated.film.title} ({updated.film.slug})")
+    return 0
+
+
+def cmd_delete(args) -> int:
+    project = load_project(_find_project(args))
+    if not args.yes:
+        _p(f"⚠ '{project.film.title}' delete karna hai? '--yes' ke saath chalao.")
+        return 1
+    from .project import delete_project
+
+    delete_project(project.root)
+    _p("🗑 Deleted.")
+    return 0
+
+
+def cmd_publish(args) -> int:
+    project = load_project(_find_project(args))
+    movie = project.root / "movie" / f"{project.film.slug}.mp4"
+    if not movie.exists():
+        _p("❌ Movie not rendered yet. Run: film-studio render")
+        return 1
+    _p(f"📤 Uploading '{project.film.title}' to YouTube…")
+    from .youtube import upload_film
+
+    url = upload_film(project, movie, title=args.title or None, privacy=args.privacy, tags=args.tags.split(",") if args.tags else None)
+    _p(f"✅ LIVE: {url}")
+    return 0
+
+
 def cmd_trailer(args) -> int:
     project = load_project(_find_project(args))
     _p("🎬 Making trailer (fast cuts + music + COMING SOON)…")
@@ -217,6 +264,21 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("render", help="Render the final movie", parents=[common])
     sub.add_parser("trailer", help="Make a fast-cut teaser trailer", parents=[common])
+
+    sp = sub.add_parser("shot", help="Regenerate one shot by number", parents=[common])
+    sp.add_argument("index", type=int, help="1-based shot number")
+    sp.add_argument("--model", default="kling-3.0", choices=["kling-3.0", "veo-3.1-fast", "ltx-2.5-pro", "minimax-h3", "qwen-image-3", "nano-banana-2", "gpt-image-2"])
+
+    sp = sub.add_parser("rename", help="Rename the film", parents=[common])
+    sp.add_argument("title")
+
+    sp = sub.add_parser("delete", help="Delete the film project", parents=[common])
+    sp.add_argument("--yes", action="store_true")
+
+    sp = sub.add_parser("publish", help="Upload the movie to YouTube", parents=[common])
+    sp.add_argument("--title", default="")
+    sp.add_argument("--privacy", default="public", choices=["public", "unlisted", "private"])
+    sp.add_argument("--tags", default="AI film, short film, AI generated")
     sub.add_parser("sound", help="Generate genre soundtrack + mix into movie", parents=[common])
 
     sp = sub.add_parser("postpro", help="Poster + subtitles + platform exports", parents=[common])
@@ -254,6 +316,10 @@ def main(argv=None) -> int:
             "voice": cmd_voice,
             "render": cmd_render,
             "trailer": cmd_trailer,
+            "shot": cmd_shot,
+            "rename": cmd_rename,
+            "delete": cmd_delete,
+            "publish": cmd_publish,
             "sound": cmd_sound,
             "postpro": cmd_postpro,
             "export": cmd_export,

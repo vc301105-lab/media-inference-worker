@@ -84,6 +84,7 @@ ACTION_NAMES = {
     "render": "Render Movie",
     "postpro": "Post-Production",
     "plan": "Plan",
+    "publish": "Publish to YouTube",
 }
 
 
@@ -175,6 +176,61 @@ def new():
     return redirect(url_for("film", slug=project.film.slug))
 
 
+@app.post("/film/<slug>/meta")
+def update_meta(slug: str):
+    root = FILMS_DIR / secure_filename(slug)
+    if not (root / "film.json").exists():
+        return redirect(url_for("index"))
+    project = load_project(root)
+    if request.form.get("title", "").strip():
+        from .project import rename_project
+
+        project = rename_project(root, request.form["title"].strip())
+    film = project.film
+    film.logline = request.form.get("logline", "")
+    film.genre = request.form.get("genre", film.genre) or film.genre
+    film.credits = request.form.get("credits", "") or film.credits
+    from .project import save_project
+
+    save_project(project)
+    return redirect(url_for("film", slug=project.film.slug))
+
+
+@app.post("/film/<slug>/shot")
+def update_shot(slug: str):
+    root = FILMS_DIR / secure_filename(slug)
+    project = load_project(root)
+    try:
+        idx = int(request.form.get("index", "-1"))
+    except ValueError:
+        idx = -1
+    shot = project.shots[idx]
+    prompt = request.form.get("prompt", "").strip()
+    duration = request.form.get("duration", "").strip()
+    if prompt:
+        shot.prompt = prompt
+        shot.local_asset = ""  # changed prompt → asset stale, regenerate
+    if duration:
+        try:
+            shot.duration = max(2.0, min(float(duration), 15.0))
+        except ValueError:
+            pass
+    from .project import save_project
+
+    save_project(project)
+    return redirect(url_for("film", slug=slug))
+
+
+@app.post("/film/<slug>/delete")
+def delete_film(slug: str):
+    from .project import delete_project
+
+    root = FILMS_DIR / secure_filename(slug)
+    if (root / "film.json").exists():
+        delete_project(root)
+    return redirect(url_for("index"))
+
+
 @app.get("/film/<slug>")
 def film(slug: str):
     root = FILMS_DIR / secure_filename(slug)
@@ -196,7 +252,11 @@ def film(slug: str):
         _FILM_TMPL.format(
             title=project.film.title,
             genre=project.film.genre,
-            logline=project.film.logline or "(no logline)",
+            logline=project.film.logline or "",
+            credits=project.film.credits,
+            genres=" ".join(
+                f'<option value="{g}"{" selected" if g == project.film.genre else ""}>{g}</option>' for g in GENRES
+            ),
             scenes=scenes_html,
             video=video,
             downloads=downloads,
@@ -207,9 +267,26 @@ def film(slug: str):
 
 
 def _scene_block(project, scene) -> str:
+    # global shot index for this scene
+    offset = 0
+    for s in project.film.scenes:
+        if s is scene:
+            break
+        offset += len(s.shots)
     shots = ""
     for s in scene.shots:
-        shots += f'<div class="shot"><span class="shot-id">#{s.index+1}</span><span class="shot-cam">{s.camera}</span><span class="shot-prompt">{s.prompt}</span></div>'
+        asset_ok = s.local_asset and Path(s.local_asset).exists()
+        status = '<span class="ok">✓ asset</span>' if asset_ok else '<span class="muted">ℹ no asset</span>'
+        shots += f"""
+        <form method="post" action="/film/{project.film.slug}/shot" class="shot-form">
+          <input type="hidden" name="index" value="{s.index}">
+          <span class="shot-id">#{s.index + 1}</span>
+          <span class="shot-cam">{s.camera}</span>
+          <input class="shot-prompt" name="prompt" value="{s.prompt}" placeholder="Prompt">
+          <input class="shot-dur" name="duration" type="number" value="{s.duration}" step="0.5" min="2" max="15" title="seconds">
+          <button class="small ghost" type="submit">💾</button>
+          {status}
+        </form>"""
     return f"""
     <div class="scene">
       <div class="scene-head"><span class="scene-num">SCENE {scene.number}</span><span class="scene-heading">{scene.heading}</span></div>
@@ -326,10 +403,14 @@ button.small { padding:7px 12px; font-size:12px; }
 .scene-num { color:var(--accent); font-size:11px; font-weight:700; letter-spacing:1px; }
 .scene-heading { font-size:14px; font-weight:600; color:var(--accent2); }
 .scene-action,.scene-narr { font-size:13px; color:#c8cade; margin:4px 0; }
-.shot { display:flex; gap:10px; align-items:baseline; font-size:12px; border-top:1px dashed var(--line); padding:7px 0 0; margin-top:7px; }
+.shot { display:flex; gap:10px; align-items:center; font-size:12px; border-top:1px dashed var(--line); padding:7px 0 0; margin-top:7px; }
 .shot-id { color:var(--muted); font-weight:700; }
 .shot-cam { color:var(--accent2); min-width:110px; }
-.shot-prompt { color:var(--muted); }
+.shot-form { display:flex; gap:8px; align-items:center; flex-wrap:wrap; width:100%; }
+.shot-prompt { flex:1; background:var(--card); font-size:12px; padding:7px 10px; min-width:220px; }
+.shot-dur { width:70px; padding:7px 8px; }
+a.danger { color:#ff7b7b; font-size:12px; }
+textarea { background:var(--card2); border:1px solid var(--line); color:#fff; border-radius:8px; padding:10px 12px; font-size:14px; width:100%; resize:vertical; }
 .dl { display:inline-block; background:var(--card2); border:1px solid var(--line); color:var(--accent2); text-decoration:none; border-radius:8px; padding:8px 12px; font-size:12px; margin:4px 6px 0 0; }
 .dl:hover { border-color:var(--accent); }
 .actions { display:flex; gap:10px; flex-wrap:wrap; margin:16px 0; }
@@ -373,11 +454,14 @@ _INDEX_TMPL = """
 _FILM_TMPL = """
 <a href="/" style="color:var(--muted);font-size:13px;">← All films</a>
 <div class="card">
-  <div style="display:flex;align-items:center;gap:14px;">
-    <h2 style="font-size:22px;margin:0;">{title}</h2>
-    <span class="badge">{genre}</span>
-  </div>
-  <p class="muted">{logline}</p>
+  <h2>✏ Film Details</h2>
+  <form method="post" action="/film/{slug}/meta" class="grid">
+    <label style="grid-column:span 2">Title <input name="title" value="{title}"></label>
+    <label>Genre <select name="genre">{genres}</select></label>
+    <label style="grid-column:span 3">Logline <input name="logline" value="{logline}"></label>
+    <label style="grid-column:span 3">Credits <input name="credits" value="{credits}"></label>
+    <div style="grid-column:1/-1"><button class="small">💾 Save</button></div>
+  </form>
 </div>
 
 <div class="card">
@@ -390,6 +474,7 @@ _FILM_TMPL = """
     <button class="small" onclick="runJob('trailer')">🍿 Trailer</button>
     <button class="small" onclick="runJob('postpro')">🖼 Poster + Subtitles</button>
     <button class="small ghost" onclick="runJob('export')">📱 9:16 + 1:1 Export</button>
+    <button class="small ghost" onclick="runJob('publish')">📤 Publish to YouTube</button>
   </div>
   <div class="note">
     Assets model: <select id="job-model">{models}</select>
@@ -406,8 +491,15 @@ _FILM_TMPL = """
 </div>
 
 <div class="card">
-  <h2>📋 Storyboard</h2>
+  <h2>📋 Storyboard <span class="muted">(prompt/duration edit karke 💾 save karo)</span></h2>
   {scenes}
+</div>
+
+<div class="card">
+  <h2>🗑 Danger</h2>
+  <form method="post" action="/film/{slug}/delete" onsubmit="return confirm('Film permanently delete honi hai?')">
+    <button class="small" style="background:#7b2a2a;">🗑 Delete Film</button>
+  </form>
 </div>
 
 <script>

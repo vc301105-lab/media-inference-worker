@@ -118,6 +118,32 @@ def save_project(project: Project) -> None:
     (project.root / "film.json").write_text(json.dumps(data, indent=2, ensure_ascii=False))
 
 
+def rename_project(root: Path, new_title: str) -> Project:
+    """Update the film title (rewrites movie filename on next render) and save."""
+    import shutil
+
+    project = load_project(root)
+    old_slug = project.film.slug
+    project.film.title = new_title
+    save_project(project)
+
+    new_slug = project.film.slug
+    if new_slug != old_slug:
+        new_root = FILMS_DIR / new_slug
+        if new_root.exists():
+            shutil.rmtree(new_root)
+        root.rename(new_root)
+        project = load_project(new_root)
+    return project
+
+
+def delete_project(root: Path) -> None:
+    import shutil
+
+    if root.exists():
+        shutil.rmtree(root)
+
+
 def load_project(root: Path) -> Project:
     data = json.loads((root / "film.json").read_text())
     scenes = []

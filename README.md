@@ -54,6 +54,10 @@ Sab actions background mein chalte hain aur log live update hota hai — page re
 | `voice` | Narration generate karo (voiceover) |
 | `render` | Final movie render karo (music + subtitles ke saath) |
 | `trailer` | Fast-cut teaser trailer banao (COMING SOON + music) |
+| `shot 3 --model kling-3.0` | Sirf ek shot regenerate karo |
+| `rename "Naya Title"` | Film ka naam badlo |
+| `delete --yes` | Film project delete karo |
+| `publish --privacy public` | YouTube par upload karo |
 | `sound` | Genre soundtrack generate karo + movie mein mix karo |
 | `postpro --ratios 9:16 1:1` | Poster + subtitles + platform exports |
 | `export --ratio 9:16` | Vertical / square export (Reels, Shorts) |
@@ -125,6 +129,23 @@ Koi bhi AI agent (Claude Desktop, Cursor, OpenCode…) seedha film bana sakta ha
 ```
 
 Uske baad Claude se bolo: *"Ek sci-fi short film banao 'Neon Rain' — 4 scenes, kling-3.0, Hindi narration, trailer ke saath"* — agent khud pipeline chalayega.
+
+## 📤 YouTube Publish
+
+Film direct YouTube par upload karo (CLI + Web button):
+
+```bash
+# 1. Google Cloud Console → OAuth Desktop app → client_secret.json download karo
+#    Save as: youtube_client_secret.json (repo root mein)
+# 2. Google API libraries install karo
+.venv/bin/pip install google-api-python-client google-auth-oauthlib google-auth-httplib2
+
+# 3. Publish
+.venv/bin/python -m film_studio publish --project films/neon-rain --privacy public
+```
+
+Pehli baar browser mein consent dena padta hai — token `films/<slug>/youtube_token.json` mein cache
+hota hai, phir silent upload. Web UI mein bhi **📤 Publish to YouTube** button hai.
 
 ## 🧩 Plugins (optional)
 
