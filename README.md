@@ -36,7 +36,10 @@ Ya sab ek saath → `film_studio all "Title" --genre drama`
 | `plan` | Pura storyboard dekho |
 | `build --model M` | AI se shots generate karo (images/videos) |
 | `voice` | Narration generate karo (voiceover) |
-| `render` | Final movie render karo |
+| `render` | Final movie render karo (music + subtitles ke saath) |
+| `sound` | Genre soundtrack generate karo + movie mein mix karo |
+| `postpro --ratios 9:16 1:1` | Poster + subtitles + platform exports |
+| `export --ratio 9:16` | Vertical / square export (Reels, Shorts) |
 | `all` | Poora pipeline ek saath |
 | `status` | Provider/api keys status |
 
@@ -91,7 +94,7 @@ RUNWAY_API_KEY=your_key_here    # (plugin optional)
 # 2-minute cinematic sci-fi film — 5 scenes, 3 shots each, Kling videos
 .venv/bin/python -m film_studio all "Neon Rain" \
   --genre scifi --scenes 5 --shots 3 --model kling-3.0 --duration 5 \
-  --voice auto --lang en-IN
+  --voice auto --lang en-IN --poster --ratios 9:16 1:1
 ```
 
 ## 🎥 Demo

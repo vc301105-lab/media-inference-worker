@@ -78,6 +78,63 @@ def cmd_render(args) -> int:
     return 0
 
 
+def cmd_sound(args) -> int:
+    project = load_project(_find_project(args))
+    _p(f"🎵 Generating {project.film.genre} soundtrack…")
+    from .soundtrack import generate_theme
+
+    theme = generate_theme(project)
+    _p(f"   Theme: {theme}")
+    movie = project.root / "movie" / f"{project.film.slug}.mp4"
+    if movie.exists():
+        _p("   Mixing into existing movie…")
+        from .render import mix_music
+
+        mix_music(project, movie, theme)
+        _p("✅ Music mixed")
+    else:
+        _p("✅ Theme ready (run 'render' to mix it)")
+    return 0
+
+
+def cmd_postpro(args) -> int:
+    project = load_project(_find_project(args))
+    movie = project.root / "movie" / f"{project.film.slug}.mp4"
+    if not movie.exists():
+        _p("❌ Movie not rendered yet. Run: film-studio render")
+        return 1
+    from .render import build_subtitle_cues, export_aspect, make_poster, write_srt
+
+    _p("🖼 Creating poster + thumbnail…")
+    poster = make_poster(project, movie)
+    _p(f"   {poster}")
+
+    _p("📝 Writing subtitles…")
+    srt = write_srt(project, build_subtitle_cues(project))
+    _p(f"   {srt}")
+
+    if args.ratios:
+        for ratio in args.ratios:
+            _p(f"   Exporting {ratio}…")
+            out = export_aspect(project, movie, ratio)
+            _p(f"   {out}")
+    _p("✅ Post-production done")
+    return 0
+
+
+def cmd_export(args) -> int:
+    project = load_project(_find_project(args))
+    movie = project.root / "movie" / f"{project.film.slug}.mp4"
+    if not movie.exists():
+        _p("❌ Movie not rendered yet. Run: film-studio render")
+        return 1
+    from .render import export_aspect
+
+    out = export_aspect(project, movie, args.ratio)
+    _p(f"✅ Exported: {out}")
+    return 0
+
+
 def cmd_all(args) -> int:
     load_env()
     _p("=" * 60)
@@ -92,11 +149,23 @@ def cmd_all(args) -> int:
     _p("[3/4] Generating narration…")
     generate_narration(project, voice=args.voice, lang=args.lang, force_silent=args.silent)
 
-    _p("[4/4] Rendering film…")
+    _p("[4/4] Rendering film (music + subtitles)…")
     out = produce_film(project)
     _p("=" * 60)
     _p(f"✅ FILM COMPLETE: {out}")
     _p(f"   Runtime ~{project.film.duration:.0f}s | {out.stat().st_size / 1e6:.1f} MB")
+
+    if args.poster:
+        from .render import make_poster
+
+        poster = make_poster(project, out)
+        _p(f"   Poster: {poster}")
+    if args.ratios:
+        from .render import export_aspect
+
+        for ratio in args.ratios:
+            exported = export_aspect(project, out, ratio)
+            _p(f"   {ratio} export: {exported}")
     _p("=" * 60)
     return 0
 
@@ -137,6 +206,13 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--silent", action="store_true", help="Force silent tracks (offline mode)")
 
     sub.add_parser("render", help="Render the final movie", parents=[common])
+    sub.add_parser("sound", help="Generate genre soundtrack + mix into movie", parents=[common])
+
+    sp = sub.add_parser("postpro", help="Poster + subtitles + platform exports", parents=[common])
+    sp.add_argument("--ratios", nargs="*", default=[], choices=["9:16", "1:1"], help="Export aspect ratios")
+
+    sp = sub.add_parser("export", help="Export a platform version (9:16 / 1:1)", parents=[common])
+    sp.add_argument("--ratio", default="9:16", choices=["9:16", "1:1"])
 
     sp = sub.add_parser("all", help="Full pipeline in one command", parents=[common])
     sp.add_argument("title")
@@ -147,8 +223,10 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--duration", type=float, default=4.0)
     sp.add_argument("--model", default="kling-3.0", choices=["kling-3.0", "veo-3.1-fast", "ltx-2.5-pro", "minimax-h3", "qwen-image-3", "nano-banana-2", "gpt-image-2"])
     sp.add_argument("--voice", default="auto")
-    sp.add_argument("--lang", default="en-IN")
+    sp.add_argument("--lang", default="en-IN", help="en-IN, hi-IN, en-US, en-GB…")
     sp.add_argument("--silent", action="store_true", help="Force silent tracks (offline mode)")
+    sp.add_argument("--poster", action="store_true", help="Also make poster + thumbnail")
+    sp.add_argument("--ratios", nargs="*", default=[], choices=["9:16", "1:1"], help="Extra platform exports")
 
     sub.add_parser("status", help="Show provider/key status")
     return parser
@@ -164,6 +242,9 @@ def main(argv=None) -> int:
             "build": cmd_build,
             "voice": cmd_voice,
             "render": cmd_render,
+            "sound": cmd_sound,
+            "postpro": cmd_postpro,
+            "export": cmd_export,
             "all": cmd_all,
             "status": cmd_status,
         }[args.cmd](args)

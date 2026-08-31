@@ -54,5 +54,14 @@ def make_project(project: Project, shots: int = 0, duration: float = 4.0, model:
 
 
 def produce_film(project: Project) -> Path:
+    theme = project.root / "sound" / f"{project.film.slug}-theme.wav"
+    if not theme.exists():
+        _p("  → generating genre soundtrack…")
+        try:
+            from .soundtrack import generate_theme
+
+            generate_theme(project)
+        except Exception as exc:
+            _p(f"    ⚠ soundtrack skipped: {exc}")
     _p("  → rendering final movie…")
     return render_film(project)

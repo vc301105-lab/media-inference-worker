@@ -98,6 +98,10 @@ def _probe_duration(path: Path) -> float:
     return h * 3600 + mn * 60 + s
 
 
+def probe_duration(path: Path) -> float:
+    return _probe_duration(path)
+
+
 def make_silent_audio(duration: float, out: Path) -> Path:
     """Generate a silent audio track (keeps film timing when no TTS available)."""
     ffmpeg = _ffmpeg()
@@ -215,8 +219,140 @@ def _concat(parts: list[Path], out: Path) -> Path:
     return out
 
 
-def render_film(project: Project) -> Path:
-    """Render the whole film: title card + per-shot clips (+ narration where available)."""
+# ---------------------------------------------------------------------------
+# Post-production: music mix, subtitles, poster, platform exports
+# ---------------------------------------------------------------------------
+
+def mix_music(project: Project, movie: Path, theme: Path) -> Path:
+    """Mux the genre soundtrack under the film's audio at low volume."""
+    ffmpeg = _ffmpeg()
+    tmp = movie.with_suffix(".music.mkv")
+    cmd = [
+        ffmpeg, "-y",
+        "-i", str(movie), "-i", str(theme),
+        "-filter_complex",
+        "[0:a]volume=1.0[voice];[1:a]volume=0.22[music];"
+        "[voice][music]amix=inputs=2:duration=first:dropout_transition=2:normalize=0[a]",
+        "-map", "0:v", "-map", "[a]",
+        "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-shortest", str(tmp),
+    ]
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    if proc.returncode != 0 or not tmp.exists():
+        raise RuntimeError(f"music mix failed: {proc.stderr[-400:]}")
+    tmp.replace(movie)
+    return movie
+
+
+def build_subtitle_cues(project: Project) -> list[tuple[float, float, str]]:
+    """Recompute subtitle cues from the deterministic render timeline."""
+    cues: list[tuple[float, float, str]] = []
+    cursor = 3.0  # title card
+    narration = {p.stem.replace("scene-", ""): p for p in (project.root / "voice").glob("scene-*.mp3")}
+    for scene in project.film.scenes:
+        scene_len = sum(s.duration for s in scene.shots)
+        if scene.narration:
+            start = cursor
+            end = cursor + scene_len
+            audio = narration.get(str(scene.number))
+            if audio and Path(audio).exists():
+                d = _probe_duration(audio)
+                if d > 0:
+                    end = min(start + d, start + scene_len)
+            cues.append((start, end, scene.narration))
+        cursor += scene_len
+    return cues
+
+
+def write_srt(project: Project, cues: list[tuple[float, float, str]]) -> Path:
+    """Write subtitles.srt from (start, end, text) cues."""
+    def ts(sec: float) -> str:
+        h, rem = divmod(max(sec, 0), 3600)
+        m, s = divmod(rem, 60)
+        return f"{int(h):02d}:{int(m):02d}:{int(s):02d},{int((s % 1) * 1000):03d}"
+
+    lines = []
+    for i, (start, end, text) in enumerate(cues, 1):
+        lines += [str(i), f"{ts(start)} --> {ts(end)}", text, ""]
+    out = project.root / "movie" / "subtitles.srt"
+    out.write_text("\n".join(lines))
+    return out
+
+
+def make_poster(project: Project, movie: Path) -> Path:
+    """Extract a frame from the first scene and overlay title + genre badge."""
+    ffmpeg = _ffmpeg()
+    frame = project.root / "render" / "poster-base.png"
+    subprocess.run(
+        [ffmpeg, "-y", "-ss", "4", "-i", str(movie), "-frames:v", "1", str(frame)],
+        capture_output=True,
+    )
+    if not frame.exists():
+        raise RuntimeError("poster frame extraction failed")
+
+    img = Image.open(frame).convert("RGB")
+    img = img.resize((1280, 720), Image.LANCZOS)
+    draw = ImageDraw.Draw(img)
+    # dark gradient at bottom for title legibility
+    for y in range(300, 720):
+        alpha = int(140 * (y - 300) / 420)
+        draw.line([(0, y), (1280, y)], fill=(0, 0, 0, alpha))
+    film = project.film
+    title_font = _font(64, bold=True)
+    badge_font = _font(28, bold=True)
+    lines = _wrap(film.title.upper(), title_font, 1160)
+    y = 470
+    for line in lines:
+        tw = draw.textlength(line, font=title_font)
+        draw.text(((1280 - tw) / 2, y), line, font=title_font, fill=(245, 235, 210))
+        y += 72
+    badge = f"  {film.genre.upper()}  |  AI FILM STUDIO  "
+    bw = draw.textlength(badge, font=badge_font) + 20
+    bx, by = (1280 - bw) / 2, min(y + 8, 660)
+    box = Image.new("RGBA", (int(bw), 44), (200, 60, 60, 220))
+    img.paste(box, (int(bx), int(by)), box)
+    draw.text((int(bx) + 10, int(by) + 6), badge, font=badge_font, fill=(255, 255, 255))
+
+    poster = project.root / "movie" / "poster.png"
+    img.save(poster)
+    thumb = project.root / "movie" / "thumbnail.jpg"
+    img.resize((640, 360), Image.LANCZOS).save(thumb, quality=85)
+    return poster
+
+
+def export_aspect(project: Project, movie: Path, ratio: str = "9:16") -> Path:
+    """Export vertical (9:16) or square (1:1) version with blurred background."""
+    ffmpeg = _ffmpeg()
+    sizes = {"9:16": (720, 1280), "1:1": (1080, 1080)}
+    if ratio not in sizes:
+        raise RuntimeError(f"unsupported ratio {ratio} (use 9:16 or 1:1)")
+    w, h = sizes[ratio]
+    fg_w = w if w < 1280 else 1280
+    fg_h = int(fg_w * 9 / 16)
+    out = project.root / "movie" / f"{project.film.slug}-{ratio.replace(':', 'x')}.mp4"
+    fc = (
+        f"[0:v]scale={w}:{h}:force_original_aspect_ratio=increase,crop={w}:{h},"
+        f"boxblur=24:2[bg];"
+        f"[0:v]scale={fg_w}:{fg_h}[fg];"
+        f"[bg][fg]overlay=(W-w)/2:(H-h)/2[v]"
+    )
+    cmd = [
+        ffmpeg, "-y", "-i", str(movie),
+        "-filter_complex", fc,
+        "-map", "[v]", "-map", "0:a?",
+        "-c:v", "libx264", "-preset", "fast", "-c:a", "aac", "-b:a", "160k",
+        "-r", "24", "-pix_fmt", "yuv420p", str(out),
+    ]
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    if proc.returncode != 0 or not out.exists():
+        raise RuntimeError(f"export failed: {proc.stderr[-400:]}")
+    return out
+
+
+def render_film(project: Project, with_music: bool = True) -> Path:
+    """Render the whole film: title card + per-shot clips (+ narration where available).
+
+    Also writes subtitles.srt and mixes the genre soundtrack if it exists.
+    """
     film = project.film
     render_dir = project.root / "render"
     clips_dir = render_dir / "clips"
@@ -224,9 +360,13 @@ def render_film(project: Project) -> Path:
     deliverable.parent.mkdir(parents=True, exist_ok=True)
 
     parts: list[Path] = []
+    cues: list[tuple[float, float, str]] = []
+    cursor = 0.0
 
     title = make_title_card(film.title.upper(), film.logline or film.genre, render_dir / "title.png")
-    parts.append(_make_clip(title, None, 3.0, clips_dir / "title.mp4", kenburns=False))
+    title_silent = make_silent_audio(3.0, render_dir / "title-silent.mp3")
+    parts.append(_make_clip(title, title_silent, 3.0, clips_dir / "title.mp4", kenburns=False))
+    cursor += 3.0
 
     narration = {
         p.stem.replace("scene-", ""): p for p in (project.root / "voice").glob("scene-*.mp3")
@@ -234,6 +374,8 @@ def render_film(project: Project) -> Path:
 
     for scene in film.scenes:
         scene_audio = narration.get(str(scene.number))
+        scene_start = cursor
+        scene_len = 0.0
         for shot in scene.shots:
             asset = Path(shot.local_asset) if shot.local_asset else None
             if not asset or not asset.exists():
@@ -253,9 +395,28 @@ def render_film(project: Project) -> Path:
                     work=render_dir / "prep",
                 )
             parts.append(clip)
+            scene_len += shot.duration
             scene_audio = None  # narration overlaid once per scene
 
-    credit = make_credit_card(film.credits, render_dir / "credits.png")
-    parts.append(_make_clip(credit, None, 3.0, clips_dir / "credits.mp4", kenburns=False))
+        # subtitle cue: use real narration length when available
+        if scene.narration:
+            end = scene_start + scene_len
+            if scene_audio_dur := _probe_duration(narration.get(str(scene.number))) if narration.get(str(scene.number)) else 0:
+                end = min(scene_start + scene_audio_dur, scene_start + scene_len)
+            cues.append((scene_start, end, scene.narration))
+        cursor += scene_len
 
-    return _concat(parts, deliverable)
+    credit = make_credit_card(film.credits, render_dir / "credits.png")
+    credit_silent = make_silent_audio(3.0, render_dir / "credits-silent.mp3")
+    parts.append(_make_clip(credit, credit_silent, 3.0, clips_dir / "credits.mp4", kenburns=False))
+    cursor += 3.0
+
+    movie = _concat(parts, deliverable)
+
+    # sound design + subtitles
+    theme = project.root / "sound" / f"{film.slug}-theme.wav"
+    if with_music and theme.exists():
+        mix_music(project, movie, theme)
+    if cues:
+        write_srt(project, cues)
+    return movie

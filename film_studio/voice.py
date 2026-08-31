@@ -13,14 +13,34 @@ from pathlib import Path
 from .config import elevenlabs_key, load_env
 from .render import make_silent_audio
 
-# edge-tts voices (free) — Indian English names work well for Hindi-ish narration too
+# edge-tts voices (free) — Hindi + Indian English + international
 EDGE_VOICES = [
     "en-IN-NeerjaNeural",
     "en-IN-PrabhatNeural",
     "en-US-AriaNeural",
     "en-US-GuyNeural",
     "en-GB-SoniaNeural",
+    "hi-IN-MadhurNeural",
+    "hi-IN-SwaraNeural",
 ]
+
+LANG_VOICE = {
+    "hi": "hi-IN-MadhurNeural",
+    "en-in": "en-IN-NeerjaNeural",
+    "en-us": "en-US-AriaNeural",
+    "en-gb": "en-GB-SoniaNeural",
+}
+
+
+def pick_voice(lang: str, voice: str = "auto") -> str:
+    """Choose an edge-tts voice: explicit name wins, otherwise auto by language."""
+    if voice and voice != "auto":
+        return voice
+    key = lang.strip().lower().replace("_", "-")
+    for prefix in (key, key.split("-")[0]):
+        if prefix in LANG_VOICE:
+            return LANG_VOICE[prefix]
+    return LANG_VOICE["en-in"]
 
 ELEVEN_VOICES = {
     "Rachel": "21m00Tcm4TlvDq8ikWAM",
@@ -38,22 +58,23 @@ def generate_narration(project, voice: str = "auto", lang: str = "en-IN", force_
 
     key = elevenlabs_key()
     paths: dict[str, str] = {}
-    silent = force_silent or not key and False
+    chosen = pick_voice(lang, voice)
+    print(f"   Voice: {chosen} {'(elevenlabs)' if key and voice == 'auto' else '(edge-tts)'}", flush=True)
     for scene in project.film.scenes:
         text = scene.narration.strip()
         if not text:
             continue
         dest = out_dir / f"scene-{scene.number:02d}.mp3"
         used = ""
-        if not silent and key:
+        if not force_silent and key:
             try:
                 _elevenlabs(key, text, dest, voice="Rachel" if voice == "auto" else voice)
                 used = "elevenlabs"
             except Exception:
                 used = ""
-        if not used and not silent:
+        if not used and not force_silent:
             try:
-                _edge_tts(text, dest, voice if voice in EDGE_VOICES else EDGE_VOICES[0], lang)
+                _edge_tts(text, dest, chosen, lang)
                 used = "edge-tts"
             except Exception:
                 used = ""
