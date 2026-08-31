@@ -1,0 +1,79 @@
+# ==================== Higgsfield (official) ====================
+https://github.com/higgsfield-ai/higgsfield.git
+https://github.com/higgsfield-ai/skills.git
+https://github.com/higgsfield-ai/cli.git
+https://github.com/higgsfield-ai/higgsfield-client.git
+https://github.com/higgsfield-ai/higgsfield-js.git
+
+# ==================== Higgsfield (community / alternative) ====================
+https://github.com/SegFault42/HeliosGen.git
+https://github.com/wide-trace/open-higgsfield.git
+https://github.com/beshuaxian/higgsfield-seedance2-jineng.git
+
+# ==================== Runway (official) ====================
+https://github.com/runwayml/runway-api-mcp-server.git
+https://github.com/runwayml/openapi.git
+https://github.com/runwayml/guided-inpainting.git
+https://github.com/runwayml/RunwayML-for-Unity.git
+https://github.com/runwayml/learn.git
+
+# ==================== Runway (community) ====================
+https://github.com/vericontext/vibeframe.git
+https://github.com/fabriciocarraro/runway-shopify-pipeline.git
+https://github.com/tryAGI/Runway.git
+https://github.com/AbdelStark/runway-rs.git
+
+# ==================== Midjourney ====================
+https://github.com/willwulfken/MidJourney-Styles-and-Keywords-Reference.git
+https://github.com/Dooy/chatgpt-web-midjourney-proxy.git
+https://github.com/novicezk/midjourney-proxy.git
+https://github.com/zcpua/midjourney-api.git
+https://github.com/trueai-org/midjourney-proxy.git
+https://github.com/George-iam/Midjourney_api.git
+https://github.com/ezioruan/midjourney-python-api.git
+https://github.com/luban-agi/Awesome-AIGC-Tutorials.git
+
+# ==================== Sora ====================
+https://github.com/Curated-Awesome-Lists/Awesome-Open-AI-Sora.git
+https://github.com/Doriandarko/sora-mcp.git
+https://github.com/all-in-aigc/sorafm.git
+https://github.com/xjpp22/awesome--sora-prompts.git
+https://github.com/SoraWeb/sora-next-web.git
+https://github.com/hitchhiker11/sora2-free-api.git
+
+# ==================== Sora (open-source alternatives) ====================
+https://github.com/hpcaitech/Open-Sora.git
+https://github.com/Wan-Video/Wan2.1.git
+https://github.com/Lightricks/LTX-Video.git
+https://github.com/THUDM/CogVideo.git
+
+# ==================== Kling ====================
+https://github.com/199-mcp/mcp-kling.git
+https://github.com/maciejdzierzek/kling-ai-prompt-generator.git
+https://github.com/M0r41/Kling-AI-Webui.git
+https://github.com/chenwr727/KLing-Video-WatermarkRemover-Enhancer.git
+https://github.com/WaveSpeedAI/awesome-kling-api.git
+https://github.com/ddokkang2/openmontage-mcp-providers.git
+
+# ==================== ElevenLabs (official) ====================
+https://github.com/elevenlabs/elevenlabs-python.git
+https://github.com/elevenlabs/elevenlabs-mcp.git
+https://github.com/elevenlabs/elevenlabs-js.git
+https://github.com/elevenlabs/skills.git
+https://github.com/elevenlabs/packages.git
+https://github.com/elevenlabs/ui.git
+https://github.com/elevenlabs/cli.git
+
+# ==================== ElevenLabs (open-source alternatives) ====================
+https://github.com/debpalash/VoiceStudio.git
+https://github.com/fishaudio/fish-speech.git
+https://github.com/hexgrad/kokoro.git
+https://github.com/coqui-ai/TTS.git
+https://github.com/souzatharsis/podcastfy.git
+
+# ==================== Everything-in-one ====================
+https://github.com/calesthio/OpenMontage.git
+https://github.com/SamurAIGPT/Generative-Media-Skills.git
+https://github.com/AUTOMATIC1111/stable-diffusion-webui.git
+https://github.com/black-forest-labs/flux.git
+https://github.com/stability-ai/generative-models.git
