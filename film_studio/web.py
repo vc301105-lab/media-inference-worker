@@ -204,6 +204,26 @@ def update_meta(slug: str):
     return redirect(url_for("film", slug=project.film.slug))
 
 
+@app.post("/film/<slug>/scene")
+def update_scene(slug: str):
+    root = FILMS_DIR / secure_filename(slug)
+    project = load_project(root)
+    try:
+        number = int(request.form.get("number", "-1"))
+    except ValueError:
+        number = -1
+    scene = project.film.scenes[number - 1] if 1 <= number <= len(project.film.scenes) else None
+    if scene:
+        for field in ("heading", "action", "narration", "dialogue"):
+            value = request.form.get(field, "").strip()
+            if value:
+                setattr(scene, field, value)
+        from .project import save_project
+
+        save_project(project)
+    return redirect(url_for("film", slug=slug))
+
+
 @app.post("/film/<slug>/shot")
 def update_shot(slug: str):
     root = FILMS_DIR / secure_filename(slug)
@@ -471,6 +491,17 @@ def _scene_block(project, scene) -> str:
         </form>
         <span class="muted">◀ ▶ reorder · ✕ delete · 💾 save prompt</span>
       </div>
+      <details class="scene-edit-box">
+        <summary>✏ Edit scene (heading / action / narration / dialogue)</summary>
+        <form method="post" action="/film/{project.film.slug}/scene" class="scene-edit">
+          <input type="hidden" name="number" value="{scene.number}">
+          <input name="heading" value="{scene.heading}" placeholder="Heading (e.g. EXT. CITY - NIGHT)">
+          <textarea name="action" rows="2" placeholder="Action description">{scene.action}</textarea>
+          <input name="narration" value="{scene.narration}" placeholder="Narration (voiceover)">
+          <input name="dialogue" value="{scene.dialogue}" placeholder="Dialogue (e.g. AARAV: …)">
+          <div><button class="small">💾 Save Scene</button></div>
+        </form>
+      </details>
     </div>"""
 
 
@@ -496,6 +527,8 @@ def job(slug: str):
             extra.append("--silent")
     if action == "postpro" and request.form.get("ratios"):
         extra = ["--ratios", *request.form.get("ratios").split()]
+    if action == "render" and request.form.get("no_watermark") == "1":
+        extra.append("--no-watermark")
     key = JOBS.start(slug, action, extra)
     return jsonify({"job": key})
 
@@ -590,6 +623,10 @@ button.mini:hover { border-color:var(--accent); }
 .recs { margin:8px 0 0; padding-left:18px; font-size:13px; color:#c8cade; }
 .recs li { margin:3px 0; }
 .scene-actions { display:flex; gap:8px; margin-top:10px; align-items:center; }
+.scene-edit { display:grid; gap:8px; margin-top:10px; }
+.scene-edit input, .scene-edit textarea { font-size:12px; background:var(--card); }
+details.scene-edit-box summary { cursor:pointer; font-size:12px; color:var(--muted); }
+details.scene-edit-box summary:hover { color:var(--accent2); }
 a.danger { color:#ff7b7b; font-size:12px; }
 textarea { background:var(--card2); border:1px solid var(--line); color:#fff; border-radius:8px; padding:10px 12px; font-size:14px; width:100%; resize:vertical; }
 .dl { display:inline-block; background:var(--card2); border:1px solid var(--line); color:var(--accent2); text-decoration:none; border-radius:8px; padding:8px 12px; font-size:12px; margin:4px 6px 0 0; }
@@ -653,6 +690,7 @@ _FILM_TMPL = """
     <button class="small" onclick="runJob('voice')">🗣 Voiceover</button>
     <button class="small" onclick="runJob('sound')">🎵 Soundtrack</button>
     <button class="small" onclick="runJob('render')">🎞 Render Movie</button>
+    <button class="small" onclick="runJob('music')">🎹 Score (chords)</button>
     <button class="small" onclick="runJob('trailer')">🍿 Trailer</button>
     <button class="small" onclick="runJob('finish')">🎬 Cinematic Look</button>
     <button class="small" onclick="runJob('review')">🔍 AI Review</button>
@@ -664,6 +702,7 @@ _FILM_TMPL = """
     Model: <select id="job-model">{models}</select>
     &nbsp; Voice lang: <select id="job-lang"><option>hi-IN</option><option>en-IN</option><option>en-US</option></select>
     &nbsp; <label style="display:inline"><input type="checkbox" id="job-silent"> offline silent</label>
+    &nbsp; <label style="display:inline"><input type="checkbox" id="job-wm" checked> watermark</label>
     &nbsp; <span class="muted">* dissolve transitions + sfx + grade auto-apply on render</span>
   </div>
   <div id="logbox" style="display:none;margin-top:12px;"><div id="log"></div></div>
@@ -700,6 +739,8 @@ async function runJob(action) {{
      if (document.getElementById('job-silent').checked) extra.set('silent','1'); }}
   if (action === 'build') {{ extra.set('model', document.getElementById('job-model').value); }}
   if (action === 'postpro') {{ extra.set('ratios', '9:16 1:1'); }}
+  if (action === 'render' && !document.getElementById('job-wm').checked) extra.set('no_watermark', '1');
+  if (action === 'music') action = 'sound';
   const r = await fetch(`/film/${{SLUG}}/job`, {{method:'POST', body: extra}});
   const {{job}} = await r.json();
   current = job;

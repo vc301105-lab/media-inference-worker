@@ -12,7 +12,7 @@ from .render import (
     make_title_card,
     mix_music,
 )
-from .soundtrack import generate_theme
+from .music import generate_theme
 
 CUT = 1.6          # seconds per teaser shot
 END_CUT = 2.5      # COMING SOON card

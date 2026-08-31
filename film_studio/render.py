@@ -45,6 +45,40 @@ def _wrap(text: str, font, max_w: int) -> list[str]:
     return lines
 
 
+def make_watermark(project: Project, text: str = "AI FILM STUDIO", out: Path | None = None) -> Path:
+    """Generate a corner watermark PNG (semi-transparent text)."""
+    from PIL import Image, ImageDraw
+
+    wm = out or project.root / "render" / "watermark.png"
+    wm.parent.mkdir(parents=True, exist_ok=True)
+    font = _font(22, bold=True)
+    img = Image.new("RGBA", (420, 46), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    draw.text((8, 10), text, font=font, fill=(255, 255, 255, 110))
+    img.save(wm)
+    return wm
+
+
+def apply_watermark(movie: Path, wm: Path) -> Path:
+    """Overlay a PNG watermark at the bottom-right of the movie (audio untouched)."""
+    if not movie.exists() or not wm.exists():
+        return movie
+    ffmpeg = _ffmpeg()
+    tmp = movie.with_suffix(".wm.mp4")
+    cmd = [
+        ffmpeg, "-y", "-i", str(movie), "-i", str(wm),
+        "-filter_complex",
+        "[1:v]format=rgba,colorchannelmixer=aa=0.45[wm];[0:v][wm]overlay=W-w-24:H-h-20",
+        "-c:v", "libx264", "-preset", "fast", "-crf", "20",
+        "-c:a", "copy", "-pix_fmt", "yuv420p", str(tmp),
+    ]
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    if proc.returncode != 0 or not tmp.exists():
+        return movie  # watermark is enhancement only
+    tmp.replace(movie)
+    return movie
+
+
 def make_title_card(text: str, sub: str, out: Path, w: int = 1280, h: int = 720) -> Path:
     img = Image.new("RGB", (w, h), (8, 10, 16))
     draw = ImageDraw.Draw(img)
@@ -348,12 +382,13 @@ def export_aspect(project: Project, movie: Path, ratio: str = "9:16") -> Path:
     return out
 
 
-def render_film(project: Project, with_music: bool = True, cinematic: bool = True, transition: str = "dissolve", sfx: bool = True) -> Path:
+def render_film(project: Project, with_music: bool = True, cinematic: bool = True, transition: str = "dissolve", sfx: bool = True, watermark: bool = True) -> Path:
     """Render the whole film: title card + per-shot clips (+ narration where available).
 
     - Narration longer than the scene → last shot auto-extends (voice never cut off).
     - transition: dissolve/fade-soft/wipe/circle between shots.
     - sfx=True adds whooshes at scene boundaries + riser at title.
+    - watermark=True overlays a corner watermark.
     - cinematic=True applies genre grade + 2.35:1 letterbox + grain + vignette.
     Also writes subtitles.srt and mixes the genre soundtrack if it exists.
     """
@@ -449,4 +484,8 @@ def render_film(project: Project, with_music: bool = True, cinematic: bool = Tru
         from .finish import apply_film_look
 
         apply_film_look(movie, genre=film.genre)
+
+    if watermark:
+        wm = make_watermark(project)
+        apply_watermark(movie, wm)
     return movie

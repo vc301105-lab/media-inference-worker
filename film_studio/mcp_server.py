@@ -26,7 +26,7 @@ from .config import check_providers, load_env
 from .pipeline import make_project, plan_film, produce_film
 from .project import FILMS_DIR, load_project, save_project
 from .render import build_subtitle_cues, export_aspect, make_poster, write_srt
-from .soundtrack import generate_theme
+from .music import generate_theme
 from .trailer import make_trailer
 from .voice import generate_narration
 

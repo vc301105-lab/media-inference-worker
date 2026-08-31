@@ -73,8 +73,8 @@ def cmd_voice(args) -> int:
 
 def cmd_render(args) -> int:
     project = load_project(_find_project(args))
-    _p(f"🎞 Rendering final film… ({args.transition} transitions, sfx={not args.no_sfx})")
-    out = produce_film(project, cinematic=not args.no_look, transition=args.transition, sfx=not args.no_sfx)
+    _p(f"🎞 Rendering final film… ({args.transition} transitions, sfx={not args.no_sfx}, watermark={not args.no_watermark})")
+    out = produce_film(project, cinematic=not args.no_look, transition=args.transition, sfx=not args.no_sfx, watermark=not args.no_watermark)
     _p(f"✅ Movie ready: {out}")
     _p(f"   Runtime: {project.film.duration:.0f}s | {out.stat().st_size / 1e6:.1f} MB")
     return 0
@@ -127,6 +127,28 @@ def cmd_delete(args) -> int:
     return 0
 
 
+def cmd_scene(args) -> int:
+    project = load_project(_find_project(args))
+    scenes = project.film.scenes
+    if not (1 <= args.number <= len(scenes)):
+        _p(f"❌ Scene 1-{len(scenes)} hi valid hai")
+        return 1
+    scene = scenes[args.number - 1]
+    if args.heading is not None:
+        scene.heading = args.heading
+    if args.action is not None:
+        scene.action = args.action
+    if args.narration is not None:
+        scene.narration = args.narration
+    if args.dialogue is not None:
+        scene.dialogue = args.dialogue
+    from .project import save_project
+
+    save_project(project)
+    _p(f"✅ Scene {scene.number} updated")
+    return 0
+
+
 def cmd_review(args) -> int:
     project = load_project(_find_project(args))
     _p(f"🔍 AI review of '{project.film.title}'…")
@@ -172,7 +194,7 @@ def cmd_trailer(args) -> int:
 def cmd_sound(args) -> int:
     project = load_project(_find_project(args))
     _p(f"🎵 Generating {project.film.genre} soundtrack…")
-    from .soundtrack import generate_theme
+    from .music import generate_theme
 
     theme = generate_theme(project)
     _p(f"   Theme: {theme}")
@@ -301,6 +323,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("render", help="Render the final movie", parents=[common])
     sp.add_argument("--no-look", action="store_true", help="Skip cinematic letterbox/grain")
     sp.add_argument("--no-sfx", action="store_true", help="Skip whoosh/riser sound effects")
+    sp.add_argument("--no-watermark", action="store_true", help="Skip corner watermark")
     sp.add_argument("--transition", default="dissolve", choices=["dissolve", "fade-soft", "wipe", "circle", "none"])
 
     sp = sub.add_parser("finish", help="Apply cinematic look to rendered movie", parents=[common])
@@ -326,6 +349,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = sub.add_parser("review", help="AI quality review of all shots", parents=[common])
     sp.add_argument("--threshold", type=float, default=6.0, help="Score below this = weak")
+
+    sp = sub.add_parser("scene", help="Edit scene metadata (heading/action/narration/dialogue)", parents=[common])
+    sp.add_argument("number", type=int)
+    sp.add_argument("--heading")
+    sp.add_argument("--action")
+    sp.add_argument("--narration")
+    sp.add_argument("--dialogue")
     sub.add_parser("sound", help="Generate genre soundtrack + mix into movie", parents=[common])
 
     sp = sub.add_parser("postpro", help="Poster + subtitles + platform exports", parents=[common])
@@ -373,6 +403,7 @@ def main(argv=None) -> int:
             "delete": cmd_delete,
             "publish": cmd_publish,
             "review": cmd_review,
+            "scene": cmd_scene,
             "sound": cmd_sound,
             "postpro": cmd_postpro,
             "export": cmd_export,
