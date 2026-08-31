@@ -2,3 +2,4 @@ requests
 pillow
 imageio-ffmpeg
 edge-tts
+flask

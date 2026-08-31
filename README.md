@@ -21,12 +21,28 @@ Ya sab ek saath → `film_studio all "Title" --genre drama`
 # 1. Setup (ek baar)
 ./setup_studio.sh
 
-# 2. Provider status dekho
-.venv/bin/python -m film_studio status
+# 2. Web UI shuru karo (browser dashboard) 🖥
+./start_studio.sh
+# → open http://localhost:8080
 
-# 3. Film banao
+# 3. Ya CLI se — provider status + film banao
+.venv/bin/python -m film_studio status
 .venv/bin/python -m film_studio all "Chandni Ki Aakhri Raat" --genre drama --scenes 3 --shots 2
 ```
+
+## 🖥 Web UI (Browser Dashboard)
+
+`./start_studio.sh` kholne ke baad browser mein:
+
+| Screen | Kya kar sakte ho |
+|--------|------------------|
+| **Home** | Naya film plan karo (title, genre, scenes, shots) + saari films ki list |
+| **Film page** | 🎥 Generate Assets · 🗣 Voiceover · 🎵 Soundtrack · 🎞 Render · 🖼 Poster/Subtitles · 📱 9:16/1:1 Export — sab buttons se |
+| **Player** | Rendered movie turant play karo + downloads |
+| **Storyboard** | Saari scenes, prompts, camera moves |
+| **/status** | Provider keys ki live status |
+
+Sab actions background mein chalte hain aur log live update hota hai — page refresh ki zaroorat nahi.
 
 ## 📚 Commands
 
